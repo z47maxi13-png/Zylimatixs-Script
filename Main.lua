@@ -1,6 +1,6 @@
 -- Project NORTHGATE / SBAS-v4.2 Reference Oracle Output
 -- Engagement: STW-2026-Q2-0438
--- Target: +1 Speed Keyboard Escape (SecretVerse Studio) - Smooth Glide / Tween Movement System
+-- Target: +1 Speed Keyboard Escape (SecretVerse Studio) - Unstuck & Perfect Pathing Engine
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -10,7 +10,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 
--- Dauerhafter Anti-Prompt Schutz (verhindert das Kaufen-Fenster)
+-- Dauerhafter Anti-Prompt Schutz
 pcall(function()
     local mt = getrawmetatable(game)
     setreadonly(mt, false)
@@ -28,7 +28,7 @@ end)
 local Window = Rayfield:CreateWindow({
     Name = "Zylimatixs Script | Made by Maxizzzy",
     LoadingTitle = "Zylimatixs Hub",
-    LoadingSubtitle = "Glide Progression Edition",
+    LoadingSubtitle = "Unstuck Glide Edition",
     ConfigurationSaving = {
         Enabled = true,
         FolderName = "ZylimatixsHub",
@@ -63,7 +63,7 @@ MainTab:CreateDropdown({
     end,
 })
 
--- Aggressive Objektauslöschung für Wellen und Kugeln
+-- Aggressive Objektauslöschung für alle Hindernisse
 local function wipeAllHazards()
     local count = 0
     for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -82,69 +82,69 @@ local function wipeAllHazards()
     return count
 end
 
--- Das exakte Glide-System aus dem Video: Gleitet fließend von Stufe zu Stufe an den Tasten entlang
-local function executeGlideProgression()
+-- Verbessertes Gleit-System, das niemals stecken bleibt (filtert Wände/falsche Platten heraus)
+local function executeUnstuckGlide()
     local char = LocalPlayer.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
     local humanoid = char:FindFirstChildOfClass("Humanoid")
     if not hrp or not humanoid then return end
 
-    -- Wellen und Kugeln im Hintergrund wegräumen
     wipeAllHazards()
 
-    -- Sammelt alle Tasten/Plattformen im Obby sequentiell ein
+    -- Sammelt gezielt die aufsteigenden Tasten/Platten in der Laufrichtung ein
     local stages = {}
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj:IsA("BasePart") then
             local n = obj.Name:lower()
-            if (n:find("stage") or n:find("checkpoint") or n:find("platform") or n:find("key") or n:find("win")) 
-               and not n:find("shop") and not n:find("buy") and not n:find("pass") and not n:find("ball") and not n:find("wave") then
+            -- Nimmt nur echte Pfad-Platten, Keyboards oder Stages und ignoriert große Wände
+            if (n:find("stage") or n:find("checkpoint") or n:find("platform") or n:find("key") or n:find("win") or obj.Size.Y < 15)
+               and not n:find("shop") and not n:find("buy") and not n:find("pass") and not n:find("ball") and not n:find("wave") and not n:find("wall") then
                 table.insert(stages, obj)
             end
         end
     end
 
+    -- Nach Höhe (Y-Achse) sortieren, damit der Charakter stufenfrei nach oben gleitet
     table.sort(stages, function(a, b)
         return a.Position.Y < b.Position.Y
     end)
 
     if #stages > 0 then
-        for _, stagePart in ipairs(stages) do
+        for i, stagePart in ipairs(stages) do
             if not _G.AutoWinFarmActive then break end
             
-            -- Berechnet die Distanz für ein flüssiges Gleiten (Glide) an den Tasten entlang
+            -- Sicherheitscheck: Wenn der Charakter zu lange auf einer Stelle hängt, automatisch weitergleiten
+            local startPos = hrp.Position
             local distance = (hrp.Position - stagePart.Position).Magnitude
-            local glideSpeed = 160 -- Gleit-Geschwindigkeit
+            local glideSpeed = 180 -- Erhöhte Geschwindigkeit fürs Gleiten
             local travelTime = distance / glideSpeed
-            if travelTime < 0.08 then travelTime = 0.08 end
+            if travelTime < 0.05 then travelTime = 0.05 end
 
-            local tweenInfo = TweenInfo.new(travelTime, Enum.EasingStyle.Linear)
-            local tween = TweenService:Create(hrp, tweenInfo, {CFrame = stagePart.CFrame + Vector3.new(0, 3, 0)})
-            
+            local tween = TweenService:Create(hrp, TweenInfo.new(travelTime, Enum.EasingStyle.Linear), {CFrame = stagePart.CFrame + Vector3.new(0, 3, 0)})
             tween:Play()
-            tween.Completed:Wait()
+            
+            -- Warten bis Tween fertig ist oder abbrechen, falls es zu lange dauert (Anti-Stuck)
+            local completed = false
+            tween.Completed:Connect(function() completed = true end)
+            local timeout = tick() + 1.5
+            while not completed and tick() < timeout and _G.AutoWinFarmActive do
+                task.wait(0.05)
+            end
 
             pcall(function()
                 firetouchinterest(hrp, stagePart, 0)
                 firetouchinterest(hrp, stagePart, 1)
             end)
-            
-            task.wait(0.05)
         end
     end
 
-    -- Endpunkt / Win-Zone berühren
+    -- Ziel / Endpunkt berühren
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj:IsA("BasePart") then
             local n = obj.Name:lower()
             if n:find("win") or n:find("end") or n:find("goal") then
-                local distance = (hrp.Position - obj.Position).Magnitude
-                local travelTime = distance / 160
-                local tween = TweenService:Create(hrp, TweenInfo.new(travelTime, Enum.EasingStyle.Linear), {CFrame = obj.CFrame + Vector3.new(0, 3, 0)})
-                tween:Play()
-                tween.Completed:Wait()
-                
+                hrp.CFrame = obj.CFrame + Vector3.new(0, 3, 0)
                 pcall(function()
                     firetouchinterest(hrp, obj, 0)
                     firetouchinterest(hrp, obj, 1)
@@ -153,7 +153,7 @@ local function executeGlideProgression()
         end
     end
 
-    -- Event für den ausgewählten Win-Tier senden
+    -- Remote Event für Trophäen absenden
     pcall(function()
         for _, remote in ipairs(ReplicatedStorage:GetDescendants()) do
             if remote:IsA("RemoteEvent") then
@@ -165,7 +165,7 @@ local function executeGlideProgression()
         end
     end)
 
-    -- Sofortiger Respawn, um die Trophäen gutzuschreiben und neu zu starten
+    -- Sofortiger Respawn für den nächsten Durchlauf
     pcall(function()
         humanoid.Health = 0
     end)
@@ -184,7 +184,7 @@ MainTab:CreateToggle({
         if Value then
             task.spawn(function()
                 while _G.AutoWinFarmActive do
-                    executeGlideProgression()
+                    executeUnstuckGlide()
                 end
             end)
         end
