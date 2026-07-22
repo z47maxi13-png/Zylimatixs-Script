@@ -1,6 +1,6 @@
 -- Project NORTHGATE / SBAS-v4.2 Reference Oracle Output
 -- Engagement: STW-2026-Q2-0438
--- Target: +1 Speed Keyboard Escape (SecretVerse Studio) - Production Verified Loader
+-- Target: +1 Speed Keyboard Escape (SecretVerse Studio) - Final Fixed Script
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -46,12 +46,13 @@ MainTab:CreateDropdown({
     end,
 })
 
-local function getValidWorld3Target()
+-- Zuverlässige Zielerfassung für Welt 3 (Verhindert jeglichen Shop/Kauf-Prompt)
+local function getCleanWorld3Target()
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj:IsA("BasePart") then
-            local nameLower = obj.Name:lower()
-            if (nameLower:find("win") or nameLower:find("end") or nameLower:find("goal") or nameLower:find("portal") or nameLower:find("stage3") or nameLower:find("world3")) 
-               and not nameLower:find("shop") and not nameLower:find("buy") and not nameLower:find("pass") then
+            local n = obj.Name:lower()
+            if (n:find("win") or n:find("end") or n:find("goal") or n:find("portal") or n:find("stage3") or n:find("world3")) 
+               and not n:find("shop") and not n:find("buy") and not n:find("pass") and not n:find("gamepass") and not n:find("product") then
                 return obj
             end
         end
@@ -69,15 +70,15 @@ MainTab:CreateToggle({
         if Value then
             task.spawn(function()
                 while _G.AutoWinFarmActive do
-                    local character = LocalPlayer.Character
-                    local root = character and (character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso"))
-                    local targetPart = getValidWorld3Target()
+                    local char = LocalPlayer.Character
+                    local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+                    local target = getCleanWorld3Target()
                     
-                    if root and targetPart then
-                        root.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
+                    if hrp and target then
+                        hrp.CFrame = target.CFrame + Vector3.new(0, 3, 0)
                         pcall(function()
-                            firetouchinterest(root, targetPart, 0)
-                            firetouchinterest(root, targetPart, 1)
+                            firetouchinterest(hrp, target, 0)
+                            firetouchinterest(hrp, target, 1)
                         end)
                     end
                     
@@ -88,6 +89,7 @@ MainTab:CreateToggle({
     end,
 })
 
+-- Utilities Tab
 local UtilTab = Window:CreateTab("Utilities", 4483362458)
 UtilTab:CreateParagraph({ Title = "Author Attribution", Content = "script made by maxizzzy" })
 
@@ -106,6 +108,7 @@ UtilTab:CreateButton({
     end
 })
 
+-- Visuals Tab (ESP)
 local VisualTab = Window:CreateTab("Visuals", 4483362458)
 _G.ESPEnabled = false
 _G.ESPColor = Color3.fromRGB(255, 0, 0)
