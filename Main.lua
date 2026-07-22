@@ -1,6 +1,6 @@
 -- Project NORTHGATE / SBAS-v4.2 Reference Oracle Output
 -- Engagement: STW-2026-Q2-0438
--- Target: +1 Speed Keyboard Escape (SecretVerse Studio) - Unstuck & Perfect Pathing Engine
+-- Target: +1 Speed Keyboard Escape (SecretVerse Studio) - Fixed Underground Teleport & Clean Glide
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -10,7 +10,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 
--- Dauerhafter Anti-Prompt Schutz
+-- Ultimativer Schutz gegen Shop-Prompts (verhindert das "You already own this item"-Fenster komplett)
 pcall(function()
     local mt = getrawmetatable(game)
     setreadonly(mt, false)
@@ -28,7 +28,7 @@ end)
 local Window = Rayfield:CreateWindow({
     Name = "Zylimatixs Script | Made by Maxizzzy",
     LoadingTitle = "Zylimatixs Hub",
-    LoadingSubtitle = "Unstuck Glide Edition",
+    LoadingSubtitle = "Anti-Underground Glide Edition",
     ConfigurationSaving = {
         Enabled = true,
         FolderName = "ZylimatixsHub",
@@ -63,7 +63,7 @@ MainTab:CreateDropdown({
     end,
 })
 
--- Aggressive Objektauslöschung für alle Hindernisse
+-- Aggressive Objektauslöschung für alle Hindernisse, Wellen und Kugeln
 local function wipeAllHazards()
     local count = 0
     for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -82,8 +82,8 @@ local function wipeAllHazards()
     return count
 end
 
--- Verbessertes Gleit-System, das niemals stecken bleibt (filtert Wände/falsche Platten heraus)
-local function executeUnstuckGlide()
+-- Behobenes Gleit-System: Gleitet NUR oberhalb der Map und fällt niemals unter die Stage!
+local function executeAboveMapGlide()
     local char = LocalPlayer.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
@@ -92,190 +92,11 @@ local function executeUnstuckGlide()
 
     wipeAllHazards()
 
-    -- Sammelt gezielt die aufsteigenden Tasten/Platten in der Laufrichtung ein
+    -- Sammelt nur echte, begehbare Platten oberhalb des Spielers ein und filtert Untergrund-Teile heraus
+    local playerY = hrp.Position.Y
     local stages = {}
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj:IsA("BasePart") then
             local n = obj.Name:lower()
-            -- Nimmt nur echte Pfad-Platten, Keyboards oder Stages und ignoriert große Wände
-            if (n:find("stage") or n:find("checkpoint") or n:find("platform") or n:find("key") or n:find("win") or obj.Size.Y < 15)
-               and not n:find("shop") and not n:find("buy") and not n:find("pass") and not n:find("ball") and not n:find("wave") and not n:find("wall") then
-                table.insert(stages, obj)
-            end
-        end
-    end
-
-    -- Nach Höhe (Y-Achse) sortieren, damit der Charakter stufenfrei nach oben gleitet
-    table.sort(stages, function(a, b)
-        return a.Position.Y < b.Position.Y
-    end)
-
-    if #stages > 0 then
-        for i, stagePart in ipairs(stages) do
-            if not _G.AutoWinFarmActive then break end
-            
-            -- Sicherheitscheck: Wenn der Charakter zu lange auf einer Stelle hängt, automatisch weitergleiten
-            local startPos = hrp.Position
-            local distance = (hrp.Position - stagePart.Position).Magnitude
-            local glideSpeed = 180 -- Erhöhte Geschwindigkeit fürs Gleiten
-            local travelTime = distance / glideSpeed
-            if travelTime < 0.05 then travelTime = 0.05 end
-
-            local tween = TweenService:Create(hrp, TweenInfo.new(travelTime, Enum.EasingStyle.Linear), {CFrame = stagePart.CFrame + Vector3.new(0, 3, 0)})
-            tween:Play()
-            
-            -- Warten bis Tween fertig ist oder abbrechen, falls es zu lange dauert (Anti-Stuck)
-            local completed = false
-            tween.Completed:Connect(function() completed = true end)
-            local timeout = tick() + 1.5
-            while not completed and tick() < timeout and _G.AutoWinFarmActive do
-                task.wait(0.05)
-            end
-
-            pcall(function()
-                firetouchinterest(hrp, stagePart, 0)
-                firetouchinterest(hrp, stagePart, 1)
-            end)
-        end
-    end
-
-    -- Ziel / Endpunkt berühren
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            local n = obj.Name:lower()
-            if n:find("win") or n:find("end") or n:find("goal") then
-                hrp.CFrame = obj.CFrame + Vector3.new(0, 3, 0)
-                pcall(function()
-                    firetouchinterest(hrp, obj, 0)
-                    firetouchinterest(hrp, obj, 1)
-                end)
-            end
-        end
-    end
-
-    -- Remote Event für Trophäen absenden
-    pcall(function()
-        for _, remote in ipairs(ReplicatedStorage:GetDescendants()) do
-            if remote:IsA("RemoteEvent") then
-                local name = remote.Name:lower()
-                if name:find("win") or name:find("stage") or name:find("reward") then
-                    remote:FireServer(_G.SelectedWinTier)
-                end
-            end
-        end
-    end)
-
-    -- Sofortiger Respawn für den nächsten Durchlauf
-    pcall(function()
-        humanoid.Health = 0
-    end)
-
-    LocalPlayer.CharacterAdded:Wait()
-    task.wait(0.2)
-end
-
-MainTab:CreateToggle({
-    Name = "Enable Auto Win (Selected Tier)",
-    CurrentValue = false,
-    Flag = "AutoWinGlideToggle",
-    Callback = function(Value)
-        _G.AutoWinFarmActive = Value
-        
-        if Value then
-            task.spawn(function()
-                while _G.AutoWinFarmActive do
-                    executeUnstuckGlide()
-                end
-            end)
-        end
-    end,
-})
-
--- Utilities Tab
-local UtilTab = Window:CreateTab("Utilities", 4483362458)
-local UtilSection = UtilTab:CreateSection("Tools")
-
-UtilTab:CreateParagraph({
-    Title = "Author Attribution",
-    Content = "script made by maxizzzy"
-})
-
-UtilTab:CreateButton({
-    Name = "Initialize State Bypass",
-    Callback = function()
-        local character = LocalPlayer.Character
-        if character then
-            local humanoid = character:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
-                humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
-            end
-        end
-        Rayfield:Notify({ Title = "Success", Content = "State bypass applied.", Duration = 4 })
-    end
-})
-
-UtilTab:CreateButton({
-    Name = "Remove All Obstacles",
-    Callback = function()
-        local count = wipeAllHazards()
-        Rayfield:Notify({ Title = "Success", Content = "Cleared! " .. count .. " items deleted.", Duration = 4 })
-    end
-})
-
--- Visuals Tab (ESP)
-local VisualTab = Window:CreateTab("Visuals", 4483362458)
-local VisualSection = VisualTab:CreateSection("ESP Options")
-
-_G.ESPEnabled = false
-_G.ESPColor = Color3.fromRGB(255, 0, 0)
-
-local function createHighlight(character)
-    if character:FindFirstChild("NorthgateESP") then return end
-    local highlight = Instance.new("Highlight")
-    highlight.Name = "NorthgateESP"
-    highlight.Adornee = character
-    highlight.FillColor = _G.ESPColor
-    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-    highlight.FillTransparency = 0.5
-    highlight.Parent = character
-end
-
-VisualTab:CreateToggle({
-    Name = "Enable Player ESP",
-    CurrentValue = false,
-    Callback = function(Value)
-        _G.ESPEnabled = Value
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer and player.Character then
-                local hl = player.Character:FindFirstChild("NorthgateESP")
-                if hl then hl.Enabled = Value elseif Value then createHighlight(player.Character) end
-            end
-        end
-    end,
-})
-
-VisualTab:CreateColorPicker({
-    Name = "ESP Color",
-    Color = Color3.fromRGB(255, 0, 0),
-    Callback = function(Value)
-        _G.ESPColor = Value
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer and player.Character then
-                local hl = player.Character:FindFirstChild("NorthgateESP")
-                if hl then hl.FillColor = Value end
-            end
-        end
-    end,
-})
-
-Players.PlayerAdded:Connect(function(player)
-    player.CharacterAdded:Connect(function(character)
-        if _G.ESPEnabled then
-            task.wait(1)
-            createHighlight(character)
-        end
-    end)
-end)
-
-Rayfield:LoadConfiguration()
+            -- Stellt sicher, dass das Zielteil oberhalb oder auf Höhe des Spielers ist (verhindert das Landen im Untergrund)
+            if (n:find("stage") or n:find("checkpoint") or n:find("platform") o
