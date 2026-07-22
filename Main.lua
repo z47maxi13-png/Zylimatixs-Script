@@ -1,6 +1,6 @@
 -- Project NORTHGATE / SBAS-v4.2 Reference Oracle Output
 -- Engagement: STW-2026-Q2-0438
--- Target: +1 Speed Keyboard Escape (SecretVerse Studio)
+-- Target: +1 Speed Keyboard Escape (SecretVerse Studio) - Fixed Win Farm
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -23,7 +23,7 @@ local Window = Rayfield:CreateWindow({
 })
 
 local MainTab = Window:CreateTab("MAIN", 4483362458)
-local MainSection = MainTab:CreateSection("Auto Farms Wins")
+local MainSection = MainTab:CreateSection("Auto Farms Wins (World 3 Fixed)")
 
 _G.SelectedWinTier = "300M Wins"
 _G.AutoWinFarmActive = false
@@ -47,37 +47,37 @@ MainTab:CreateDropdown({
     end,
 })
 
--- Intelligenter Remote & Trigger-Finder für SecretVerse Spiele
-local function triggerWinRemote()
+-- Verbesserte Funktion zum Triggern von Wins für Welt 3 (3.5B etc.)
+local function triggerWinAction()
     local success = false
     
-    -- Methode 1: Suche nach RemoteEvents im ReplicatedStorage (Standard für Simulator/Escape Games)
+    -- 1. Suche nach Remotes, die für Gewinne oder Welt 3 zuständig sind
     for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
         if v:IsA("RemoteEvent") then
             local name = v.Name:lower()
-            if name:find("win") or name:find("finish") or name:find("claim") or name:find("stage") or name:find("reward") then
+            if name:find("win") or name:find("stage") or name:find("leaderboard") or name:find("goal") or name:find("escape") then
                 pcall(function()
                     v:FireServer(_G.SelectedWinTier)
+                    v:FireServer(3.5) -- Backup-Parameter für hohe Multiplikatoren
                     success = true
                 end)
             end
         end
     end
     
-    -- Methode 2: Physisches Antippen des End-Portals oder der World 3 Win-Zone im Workspace
-    if not success then
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("BasePart") then
-                local nameLower = obj.Name:lower()
-                if nameLower:find("win") or nameLower:find("end") or nameLower:find("goal") or nameLower:find("portal") then
-                    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                    if root then
-                        pcall(function()
-                            firetouchinterest(root, obj, 0)
-                            firetouchinterest(root, obj, 1)
-                            success = true
-                        end)
-                    end
+    -- 2. Physischer Fallback: Welt 3 End-Zone / Portal im Workspace ansteuern
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            local nameLower = obj.Name:lower()
+            if nameLower:find("win") or nameLower:find("world3") or nameLower:find("stage3") or nameLower:find("portal") then
+                local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    pcall(function()
+                        root.CFrame = obj.CFrame + Vector3.new(0, 3, 0)
+                        firetouchinterest(root, obj, 0)
+                        firetouchinterest(root, obj, 1)
+                        success = true
+                    end)
                 end
             end
         end
@@ -96,8 +96,8 @@ MainTab:CreateToggle({
         if Value then
             task.spawn(function()
                 while _G.AutoWinFarmActive do
-                    triggerWinRemote()
-                    task.wait(0.5) -- Schneller Intervall für den Win-Loop
+                    triggerWinAction()
+                    task.wait(0.4)
                 end
             end)
         end
@@ -137,7 +137,7 @@ local function createHighlight(character)
     highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
     highlight.FillTransparency = 0.5
     highlight.Parent = character
-}
+end
 
 VisualTab:CreateToggle({
     Name = "Enable Player ESP",
