@@ -1,6 +1,6 @@
 -- Project NORTHGATE / SBAS-v4.2 Reference Oracle Output
 -- Engagement: STW-2026-Q2-0438
--- Target: +1 Speed Keyboard Escape (SecretVerse Studio) - Final Fixed Script
+-- Target: +1 Speed Keyboard Escape (SecretVerse Studio) - Stage Progression & Obstacle Removal
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -22,7 +22,7 @@ local Window = Rayfield:CreateWindow({
 })
 
 local MainTab = Window:CreateTab("MAIN", 4483362458)
-local MainSection = MainTab:CreateSection("Auto Farms Wins")
+local MainSection = MainTab:CreateSection("Auto Farms Wins (Stage Progression)")
 
 _G.SelectedWinTier = "300M Wins"
 _G.AutoWinFarmActive = false
@@ -46,18 +46,27 @@ MainTab:CreateDropdown({
     end,
 })
 
--- Zuverlässige Zielerfassung für Welt 3 (Verhindert jeglichen Shop/Kauf-Prompt)
-local function getCleanWorld3Target()
+-- Funktion zum Finden und sequentiellen Durchlaufen der Stages (Stage 1 -> Stage 2 -> Stage 3 / End)
+local function getStagesInOrder()
+    local stages = {}
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj:IsA("BasePart") then
-            local n = obj.Name:lower()
-            if (n:find("win") or n:find("end") or n:find("goal") or n:find("portal") or n:find("stage3") or n:find("world3")) 
-               and not n:find("shop") and not n:find("buy") and not n:find("pass") and not n:find("gamepass") and not n:find("product") then
-                return obj
+            local nameLower = obj.Name:lower()
+            -- Sucht nach Stage-Teilen, Plattformen oder Checkpoints
+            if nameLower:find("stage") or nameLower:find("checkpoint") or nameLower:find("platform") or nameLower:find("win") or nameLower:find("end") then
+                if not nameLower:find("shop") and not nameLower:find("buy") and not nameLower:find("pass") then
+                    table.insert(stages, obj)
+                end
             end
         end
     end
-    return nil
+    
+    -- Sortiert die Stages nach ihrer Höhe (Y-Koordinate) oder Position, damit sie nacheinander abgelaufen werden
+    table.sort(stages, function(a, b)
+        return a.Position.Y < b.Position.Y
+    end)
+    
+    return stages
 end
 
 MainTab:CreateToggle({
@@ -72,24 +81,31 @@ MainTab:CreateToggle({
                 while _G.AutoWinFarmActive do
                     local char = LocalPlayer.Character
                     local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
-                    local target = getCleanWorld3Target()
                     
-                    if hrp and target then
-                        hrp.CFrame = target.CFrame + Vector3.new(0, 3, 0)
-                        pcall(function()
-                            firetouchinterest(hrp, target, 0)
-                            firetouchinterest(hrp, target, 1)
-                        end)
+                    if hrp then
+                        local stages = getStagesInOrder()
+                        if #stages > 0 then
+                            -- Geht die Stages nacheinander kurz durch, damit das Spiel den Fortschritt registriert
+                            for _, stagePart in ipairs(stages) do
+                                if not _G.AutoWinFarmActive then break end
+                                hrp.CFrame = stagePart.CFrame + Vector3.new(0, 3, 0)
+                                pcall(function()
+                                    firetouchinterest(hrp, stagePart, 0)
+                                    firetouchinterest(hrp, stagePart, 1)
+                                end)
+                                task.wait(0.25) -- Kurze Pause auf jeder Plattform, damit das Spiel es "sieht"
+                            end
+                        end
                     end
                     
-                    task.wait(1.5)
+                    task.wait(1)
                 end
             end)
         end
     end,
 })
 
--- Utilities Tab
+-- Neuer Tab für Utilities / Funktionen (Entfernen von Hindernissen)
 local UtilTab = Window:CreateTab("Utilities", 4483362458)
 UtilTab:CreateParagraph({ Title = "Author Attribution", Content = "script made by maxizzzy" })
 
@@ -105,6 +121,33 @@ UtilTab:CreateButton({
             end
         end
         Rayfield:Notify({ Title = "Success", Content = "State bypass applied.", Duration = 4 })
+    end
+})
+
+-- Button zum Entfernen aller Hindernisse (Wellen, Kugeln etc.)
+UtilTab:CreateButton({
+    Name = "Remove Obstacles (Waves, Balls, etc.)",
+    Callback = function()
+        local removedCount = 0
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj:IsA("BasePart") or obj:IsA("Model") then
+                local nameLower = obj.Name:lower()
+                -- Filtert typische Hindernisse wie Wellen, Kugeln, Laser, Fallen, Killszteine
+                if nameLower:find("wave") or nameLower:find("ball") or nameLower:find("kugel")  
+                   or nameLower:find("kill") or nameLower:find("laser") or nameLower:find("obstacle") 
+                   or nameLower:find("hazard") or nameLower:find("trap") or nameLower:find("fire") then
+                    pcall(function()
+                        obj:Destroy()
+                        removedCount = removedCount + 1
+                    end)
+                end
+            end
+        end
+        Rayfield:Notify({
+            Title = "Obstacles Removed",
+            Content = "Successfully deleted " .. removedCount .. " hazard objects from the map.",
+            Duration = 5,
+        })
     end
 })
 
