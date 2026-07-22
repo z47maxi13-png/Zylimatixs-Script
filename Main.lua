@@ -1,11 +1,11 @@
 -- Project NORTHGATE / SBAS-v4.2 Reference Oracle Output
 -- Engagement: STW-2026-Q2-0438
--- Probe Class: Code Synthesis / Rayfield Dropdown & Toggle Integration
--- Target Environment: Roblox Luau Runtime (Delta Executor)
+-- Target: +1 Speed Keyboard Escape (SecretVerse Studio)
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
@@ -18,24 +18,10 @@ local Window = Rayfield:CreateWindow({
         FolderName = "ZylimatixsHub",
         FileName = "Config"
     },
-    Discord = {
-        Enabled = false,
-        Invite = "noinvite",
-        RememberJoins = true
-    },
-    KeySystem = false,
-    KeySettings = {
-        Title = "Zylimatixs Authentication",
-        Subtitle = "Session Key Required",
-        Note = "script made by maxizzzy",
-        FileName = "ZylimatixsKey",
-        SaveKey = true,
-        GrabKeyFromSite = false,
-        Key = {"maxizzzy"}
-    }
+    Discord = { Enabled = false, Invite = "noinvite", RememberJoins = true },
+    KeySystem = false
 })
 
--- MAIN Tab (Requested)
 local MainTab = Window:CreateTab("MAIN", 4483362458)
 local MainSection = MainTab:CreateSection("Auto Farms Wins")
 
@@ -61,16 +47,43 @@ MainTab:CreateDropdown({
     end,
 })
 
-local function getTargetGoal()
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            local nameLower = obj.Name:lower()
-            if nameLower:find("win") or nameLower:find("end") or nameLower:find("finish") or nameLower:find("goal") or nameLower:find("world3") or nameLower:find("stage3") then
-                return obj
+-- Intelligenter Remote & Trigger-Finder für SecretVerse Spiele
+local function triggerWinRemote()
+    local success = false
+    
+    -- Methode 1: Suche nach RemoteEvents im ReplicatedStorage (Standard für Simulator/Escape Games)
+    for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
+        if v:IsA("RemoteEvent") then
+            local name = v.Name:lower()
+            if name:find("win") or name:find("finish") or name:find("claim") or name:find("stage") or name:find("reward") then
+                pcall(function()
+                    v:FireServer(_G.SelectedWinTier)
+                    success = true
+                end)
             end
         end
     end
-    return nil
+    
+    -- Methode 2: Physisches Antippen des End-Portals oder der World 3 Win-Zone im Workspace
+    if not success then
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                local nameLower = obj.Name:lower()
+                if nameLower:find("win") or nameLower:find("end") or nameLower:find("goal") or nameLower:find("portal") then
+                    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if root then
+                        pcall(function()
+                            firetouchinterest(root, obj, 0)
+                            firetouchinterest(root, obj, 1)
+                            success = true
+                        end)
+                    end
+                end
+            end
+        end
+    end
+    
+    return success
 end
 
 MainTab:CreateToggle({
@@ -83,27 +96,17 @@ MainTab:CreateToggle({
         if Value then
             task.spawn(function()
                 while _G.AutoWinFarmActive do
-                    local character = LocalPlayer.Character
-                    local root = character and (character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso"))
-                    local targetPart = getTargetGoal()
-                    
-                    if root and targetPart then
-                        root.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
-                    end
-                    
-                    task.wait(1)
+                    triggerWinRemote()
+                    task.wait(0.5) -- Schneller Intervall für den Win-Loop
                 end
             end)
         end
     end,
 })
 
--- Additional Utilities Tab
+-- Utilities Tab
 local UtilTab = Window:CreateTab("Utilities", 4483362458)
-UtilTab:CreateParagraph({
-    Title = "Author Attribution",
-    Content = "script made by maxizzzy"
-})
+UtilTab:CreateParagraph({ Title = "Author Attribution", Content = "script made by maxizzzy" })
 
 UtilTab:CreateButton({
     Name = "Initialize State Bypass",
@@ -116,11 +119,7 @@ UtilTab:CreateButton({
                 humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
             end
         end
-        Rayfield:Notify({
-            Title = "Execution Success",
-            Content = "State bypass applied.",
-            Duration = 4,
-        })
+        Rayfield:Notify({ Title = "Success", Content = "State bypass applied.", Duration = 4 })
     end
 })
 
@@ -137,10 +136,8 @@ local function createHighlight(character)
     highlight.FillColor = _G.ESPColor
     highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
     highlight.FillTransparency = 0.5
-    highlight.OutlineTransparency = 0
-    highlight.Enabled = _G.ESPEnabled
     highlight.Parent = character
-end
+}
 
 VisualTab:CreateToggle({
     Name = "Enable Player ESP",
@@ -150,11 +147,7 @@ VisualTab:CreateToggle({
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LocalPlayer and player.Character then
                 local hl = player.Character:FindFirstChild("NorthgateESP")
-                if hl then
-                    hl.Enabled = Value
-                elseif Value then
-                    createHighlight(player.Character)
-                end
+                if hl then hl.Enabled = Value elseif Value then createHighlight(player.Character) end
             end
         end
     end,
@@ -168,9 +161,7 @@ VisualTab:CreateColorPicker({
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LocalPlayer and player.Character then
                 local hl = player.Character:FindFirstChild("NorthgateESP")
-                if hl then
-                    hl.FillColor = Value
-                end
+                if hl then hl.FillColor = Value end
             end
         end
     end,
