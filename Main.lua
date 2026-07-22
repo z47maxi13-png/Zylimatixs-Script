@@ -1,6 +1,6 @@
 -- Project NORTHGATE / SBAS-v4.2 Reference Oracle Output
 -- Engagement: STW-2026-Q2-0438
--- Target: +1 Speed Keyboard Escape (SecretVerse Studio) - Safe Zone & Trophy Flight Engine
+-- Target: +1 Speed Keyboard Escape (SecretVerse Studio) - Smooth Glide / Tween Movement System
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -10,7 +10,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 
--- Schutz gegen Shop-Prompts
+-- Dauerhafter Anti-Prompt Schutz (verhindert das Kaufen-Fenster)
 pcall(function()
     local mt = getrawmetatable(game)
     setreadonly(mt, false)
@@ -28,7 +28,7 @@ end)
 local Window = Rayfield:CreateWindow({
     Name = "Zylimatixs Script | Made by Maxizzzy",
     LoadingTitle = "Zylimatixs Hub",
-    LoadingSubtitle = "Safe Zone & Flight Edition",
+    LoadingSubtitle = "Glide Progression Edition",
     ConfigurationSaving = {
         Enabled = true,
         FolderName = "ZylimatixsHub",
@@ -39,11 +39,10 @@ local Window = Rayfield:CreateWindow({
 })
 
 local MainTab = Window:CreateTab("MAIN", 4483362458)
-local MainSection = MainTab:CreateSection("Auto Farm (Safe Zone & Trophy Flight)")
+local MainSection = MainTab:CreateSection("Auto Win (Glide System)")
 
 _G.SelectedWinTier = "300M Wins"
 _G.AutoWinFarmActive = false
-_G.SafeZonePosition = nil -- Hier speicherst du deinen Checkpoint in der sicheren Zone
 
 local winTiers = {
     "300M Wins",
@@ -64,73 +63,97 @@ MainTab:CreateDropdown({
     end,
 })
 
--- 1. Button: Setzt deinen Checkpoint in der sicheren Zone (Mitte)
-MainTab:CreateButton({
-    Name = "🛡️ Set Safe Zone Checkpoint Here",
-    Callback = function()
-        local char = LocalPlayer.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            _G.SafeZonePosition = hrp.CFrame
-            Rayfield:Notify({
-                Title = "Safe Zone Saved!",
-                Content = "Your starting checkpoint is locked.",
-                Duration = 4,
-            })
-        end
-    end
-})
-
--- Sucht automatisch das Trophäen-Viereck / End-Portal im Spiel
-local function findTrophyGoalPart()
+-- Aggressive Objektauslöschung für Wellen und Kugeln
+local function wipeAllHazards()
+    local count = 0
     for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
+        if obj:IsA("BasePart") or obj:IsA("Model") then
             local n = obj.Name:lower()
-            if (n:find("win") or n:find("end") or n:find("goal") or n:find("trophy") or n:find("reward")) 
-               and not n:find("shop") and not n:find("buy") and not n:find("pass") then
-                return obj
+            if n:find("wave") or n:find("welle") or n:find("ball") or n:find("kugel") or n:find("sphere") 
+               or n:find("kill") or n:find("laser") or n:find("obstacle") or n:find("trap") 
+               or n:find("fire") or n:find("hazard") or n:find("roller") or n:find("moving") then
+                pcall(function()
+                    obj:Destroy()
+                    count = count + 1
+                end)
             end
         end
     end
-    return nil
+    return count
 end
 
--- Haupt-Loop: Startet in der Safe Zone -> Fliegt zum Trophäen-Viereck -> Holt Wins -> Zurück zur Safe Zone / Respawn
-local function executeSafeZoneFarm()
+-- Das exakte Glide-System aus dem Video: Gleitet fließend von Stufe zu Stufe an den Tasten entlang
+local function executeGlideProgression()
     local char = LocalPlayer.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
     local humanoid = char:FindFirstChildOfClass("Humanoid")
     if not hrp or not humanoid then return end
 
-    -- Wenn eine Safe Zone gesetzt ist, teleportiere zuerst dorthin (als stabiler Startpunkt)
-    if _G.SafeZonePosition then
-        hrp.CFrame = _G.SafeZonePosition
-        task.wait(0.2)
+    -- Wellen und Kugeln im Hintergrund wegräumen
+    wipeAllHazards()
+
+    -- Sammelt alle Tasten/Plattformen im Obby sequentiell ein
+    local stages = {}
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            local n = obj.Name:lower()
+            if (n:find("stage") or n:find("checkpoint") or n:find("platform") or n:find("key") or n:find("win")) 
+               and not n:find("shop") and not n:find("buy") and not n:find("pass") and not n:find("ball") and not n:find("wave") then
+                table.insert(stages, obj)
+            end
+        end
     end
 
-    -- Suche das Trophäen-Viereck
-    local trophyPart = findTrophyGoalPart()
-    
-    if trophyPart then
-        -- Sanfter Flug zum Trophäen-Viereck (damit das Spiel es wie einen echten Lauf registriert)
-        local distance = (hrp.Position - trophyPart.Position).Magnitude
-        local speed = 200
-        local travelTime = distance / speed
-        if travelTime < 0.1 then travelTime = 0.1 end
+    table.sort(stages, function(a, b)
+        return a.Position.Y < b.Position.Y
+    end)
 
-        local tween = TweenService:Create(hrp, TweenInfo.new(travelTime, Enum.EasingStyle.Linear), {CFrame = trophyPart.CFrame + Vector3.new(0, 2, 0)})
-        tween:Play()
-        tween.Completed:Wait()
+    if #stages > 0 then
+        for _, stagePart in ipairs(stages) do
+            if not _G.AutoWinFarmActive then break end
+            
+            -- Berechnet die Distanz für ein flüssiges Gleiten (Glide) an den Tasten entlang
+            local distance = (hrp.Position - stagePart.Position).Magnitude
+            local glideSpeed = 160 -- Gleit-Geschwindigkeit
+            local travelTime = distance / glideSpeed
+            if travelTime < 0.08 then travelTime = 0.08 end
 
-        -- Berührung des Trophäen-Vierecks erzwingen
-        pcall(function()
-            firetouchinterest(hrp, trophyPart, 0)
-            firetouchinterest(hrp, trophyPart, 1)
-        end)
+            local tweenInfo = TweenInfo.new(travelTime, Enum.EasingStyle.Linear)
+            local tween = TweenService:Create(hrp, tweenInfo, {CFrame = stagePart.CFrame + Vector3.new(0, 3, 0)})
+            
+            tween:Play()
+            tween.Completed:Wait()
+
+            pcall(function()
+                firetouchinterest(hrp, stagePart, 0)
+                firetouchinterest(hrp, stagePart, 1)
+            end)
+            
+            task.wait(0.05)
+        end
     end
 
-    -- Win-Tier Event an den Server senden
+    -- Endpunkt / Win-Zone berühren
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            local n = obj.Name:lower()
+            if n:find("win") or n:find("end") or n:find("goal") then
+                local distance = (hrp.Position - obj.Position).Magnitude
+                local travelTime = distance / 160
+                local tween = TweenService:Create(hrp, TweenInfo.new(travelTime, Enum.EasingStyle.Linear), {CFrame = obj.CFrame + Vector3.new(0, 3, 0)})
+                tween:Play()
+                tween.Completed:Wait()
+                
+                pcall(function()
+                    firetouchinterest(hrp, obj, 0)
+                    firetouchinterest(hrp, obj, 1)
+                end)
+            end
+        end
+    end
+
+    -- Event für den ausgewählten Win-Tier senden
     pcall(function()
         for _, remote in ipairs(ReplicatedStorage:GetDescendants()) do
             if remote:IsA("RemoteEvent") then
@@ -142,26 +165,26 @@ local function executeSafeZoneFarm()
         end
     end)
 
-    -- Respawn auslösen, um die Trophäen einzusacken und zum Start zurückzukehren
+    -- Sofortiger Respawn, um die Trophäen gutzuschreiben und neu zu starten
     pcall(function()
         humanoid.Health = 0
     end)
 
     LocalPlayer.CharacterAdded:Wait()
-    task.wait(0.3)
+    task.wait(0.2)
 end
 
 MainTab:CreateToggle({
-    Name = "Auto Farms Wins (Safe Zone)",
+    Name = "Enable Auto Win (Selected Tier)",
     CurrentValue = false,
-    Flag = "AutoWinsSafeZoneToggle",
+    Flag = "AutoWinGlideToggle",
     Callback = function(Value)
         _G.AutoWinFarmActive = Value
         
         if Value then
             task.spawn(function()
                 while _G.AutoWinFarmActive do
-                    executeSafeZoneFarm()
+                    executeGlideProgression()
                 end
             end)
         end
@@ -193,20 +216,9 @@ UtilTab:CreateButton({
 })
 
 UtilTab:CreateButton({
-    Name = "Remove All Obstacles & Waves",
+    Name = "Remove All Obstacles",
     Callback = function()
-        local count = 0
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("BasePart") or obj:IsA("Model") then
-                local n = obj.Name:lower()
-                if n:find("wave") or n:find("welle") or n:find("ball") or n:find("kugel") or n:find("sphere") or n:find("kill") or n:find("laser") or n:find("obstacle") or n:find("trap") or n:find("fire") or n:find("hazard") then
-                    pcall(function()
-                        obj:Destroy()
-                        count = count + 1
-                    end)
-                end
-            end
-        end
+        local count = wipeAllHazards()
         Rayfield:Notify({ Title = "Success", Content = "Cleared! " .. count .. " items deleted.", Duration = 4 })
     end
 })
