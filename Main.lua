@@ -44,6 +44,8 @@ local MainSection = MainTab:CreateSection("Auto Win (Glide System)")
 _G.SelectedWinTier = "300M Wins"
 _G.AutoWinFarmActive = false
 _G.AutoResetEnabled = false
+_G.GlideHeight = 15         -- studs above the route, low and flat like a real glide
+_G.GlideSpeed = 190         -- studs per second
 
 local winTiers = {
     "300M Wins",
@@ -69,14 +71,12 @@ local stageWords = {"stage", "checkpoint", "platform", "key", "win"}
 local stageBlockWords = {"shop", "buy", "pass", "ball", "wave", "wall"}
 local goalWords = {"win", "end", "goal"}
 
--- Glide tuning
-local glideSpeed = 190      -- studs per second
+-- Glide tuning (height and speed are sliders in the MAIN tab)
 local arriveRadius = 12     -- how close to a target still counts as reached
 local stuckTimeout = 0.6    -- seconds without movement before a jump counts as stuck
 local maxMisses = 3         -- failed stages in a row before the cycle restarts
 local respawnTimeout = 8    -- seconds we wait for a new character after the reset
 local searchDepth = 15      -- how far below the player a target may still sit
-local flightHeight = 60     -- cruise height above the route, clears rolling boulders
 
 -- Every toggle flip bumps this, so threads from an earlier run stop themselves
 local farmGeneration = 0
@@ -180,7 +180,7 @@ end
 -- Tweens the root part to one waypoint and reports whether we really arrived
 local function tweenTo(hrp, targetCFrame, generation)
     local distance = (targetCFrame.Position - hrp.Position).Magnitude
-    local travelTime = math.max(distance / glideSpeed, 0.05)
+    local travelTime = math.max(distance / math.max(_G.GlideSpeed, 10), 0.05)
 
     local tween = TweenService:Create(hrp, TweenInfo.new(travelTime, Enum.EasingStyle.Linear), {CFrame = targetCFrame})
     tween:Play()
@@ -227,15 +227,26 @@ local function tweenTo(hrp, targetCFrame, generation)
     return (hrp.Position - targetCFrame.Position).Magnitude <= arriveRadius
 end
 
--- Lifts the character over the map, crosses at cruise height, then drops onto the target.
--- Flying straight at a stage ran right through the boulders rolling down the track.
-local function glideAbove(hrp, targetCFrame, generation)
-    local cruiseY = math.max(hrp.Position.Y, targetCFrame.Position.Y) + flightHeight
-    local liftPoint = CFrame.new(hrp.Position.X, cruiseY, hrp.Position.Z)
-    local crossPoint = CFrame.new(targetCFrame.Position.X, cruiseY, targetCFrame.Position.Z)
+-- CFrame.new(position, lookAt) throws when both points are identical
+local function facing(position, lookAt)
+    if (lookAt - position).Magnitude < 0.1 then
+        return CFrame.new(position)
+    end
+    return CFrame.new(position, lookAt)
+end
 
-    if not tweenTo(hrp, liftPoint, generation) then return false end
-    if not tweenTo(hrp, crossPoint, generation) then return false end
+-- Rises just far enough to clear the walls in between, crosses at a steady speed facing
+-- the direction of travel, then settles onto the stage. A low flat glide, not a tall arc.
+local function glideRoute(hrp, targetCFrame, generation)
+    local startPos = hrp.Position
+    local targetPos = targetCFrame.Position
+    local cruiseY = math.max(startPos.Y, targetPos.Y) + math.max(_G.GlideHeight, 0)
+
+    local liftPos = Vector3.new(startPos.X, cruiseY, startPos.Z)
+    local crossPos = Vector3.new(targetPos.X, cruiseY, targetPos.Z)
+
+    if not tweenTo(hrp, facing(liftPos, crossPos), generation) then return false end
+    if not tweenTo(hrp, facing(crossPos, targetPos), generation) then return false end
     return tweenTo(hrp, targetCFrame, generation)
 end
 
@@ -278,7 +289,7 @@ local function traverse(hrp, stages, goals, generation)
 
         -- The stage can be gone by now, the scan happened a few seconds ago
         if stagePart.Parent then
-            if glideAbove(hrp, stagePart.CFrame + Vector3.new(0, 4, 0), generation) then
+            if glideRoute(hrp, stagePart.CFrame + Vector3.new(0, 4, 0), generation) then
                 misses = 0
                 touchPart(hrp, stagePart)
             else
@@ -379,6 +390,32 @@ MainTab:CreateToggle({
     Flag = "AutoResetToggle",
     Callback = function(Value)
         _G.AutoResetEnabled = Value
+    end,
+})
+
+local TuningSection = MainTab:CreateSection("Glide Tuning")
+
+MainTab:CreateSlider({
+    Name = "Glide Height",
+    Range = {0, 150},
+    Increment = 5,
+    Suffix = " studs",
+    CurrentValue = 15,
+    Flag = "GlideHeightSlider",
+    Callback = function(Value)
+        _G.GlideHeight = Value
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "Glide Speed",
+    Range = {50, 600},
+    Increment = 10,
+    Suffix = " studs/s",
+    CurrentValue = 190,
+    Flag = "GlideSpeedSlider",
+    Callback = function(Value)
+        _G.GlideSpeed = Value
     end,
 })
 
