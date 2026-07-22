@@ -63,44 +63,69 @@ MainTab:CreateDropdown({
     end,
 })
 
+local hazardWords = {"wave", "welle", "ball", "kugel", "sphere", "kill", "laser", "obstacle", "trap", "fire", "hazard", "roller", "moving"}
+local stageWords = {"stage", "checkpoint", "platform", "key", "win"}
+local stageBlockWords = {"shop", "buy", "pass", "ball", "wave", "wall"}
+local goalWords = {"win", "end", "goal"}
+
+-- Glide tuning
+local glideSpeed = 190      -- studs per second
+local arriveRadius = 12     -- how close to a target still counts as reached
+local stuckTimeout = 0.6    -- seconds without movement before a jump counts as stuck
+local maxMisses = 3         -- failed stages in a row before the cycle restarts
+local respawnTimeout = 8    -- seconds we wait for a new character after the reset
+
+-- Every toggle flip bumps this, so threads from an earlier run stop themselves
+local farmGeneration = 0
+
+local function matchesAny(name, words)
+    for _, word in ipairs(words) do
+        if name:find(word, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+local function farmActive(generation)
+    return _G.AutoWinFarmActive and generation == farmGeneration
+end
+
 -- Hazard and Obstacle Eraser (W Waves, Balls, Spheres, Lasers)
+local function isHazard(obj)
+    return (obj:IsA("BasePart") or obj:IsA("Model")) and matchesAny(obj.Name:lower(), hazardWords)
+end
+
 local function wipeAllHazards()
     local count = 0
     for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") or obj:IsA("Model") then
-            local n = obj.Name:lower()
-            if n:find("wave") or n:find("welle") or n:find("ball") or n:find("kugel") or n:find("sphere") 
-               or n:find("kill") or n:find("laser") or n:find("obstacle") or n:find("trap") 
-               or n:find("fire") or n:find("hazard") or n:find("roller") or n:find("moving") then
-                pcall(function()
-                    obj:Destroy()
-                    count = count + 1
-                end)
+        if isHazard(obj) then
+            local removed = pcall(function()
+                obj:Destroy()
+            end)
+            if removed then
+                count = count + 1
             end
         end
     end
     return count
 end
 
--- Above-Map Glide Progression Engine (Prevents underground falling / clipping)
-local function executeCleanGlide()
-    local char = LocalPlayer.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
-    local humanoid = char:FindFirstChildOfClass("Humanoid")
-    if not hrp or not humanoid then return end
-
-    wipeAllHazards()
-
-    local playerY = hrp.Position.Y
-    local stages = {}
+-- One descendant pass clears hazards and collects the climb targets (three passes lagged big maps)
+local function scanAndClear(playerY)
+    local stages, goals = {}, {}
     for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
+        if isHazard(obj) then
+            pcall(function()
+                obj:Destroy()
+            end)
+        elseif obj:IsA("BasePart") and obj.Parent and obj.Position.Y >= playerY - 15 then
             local n = obj.Name:lower()
-            if (n:find("stage") or n:find("checkpoint") or n:find("platform") or n:find("key") or n:find("win")) 
-               and not n:find("shop") and not n:find("buy") and not n:find("pass") and not n:find("ball") and not n:find("wave") and not n:find("wall") 
-               and obj.Position.Y >= playerY - 15 then
+            if matchesAny(n, stageWords) and not matchesAny(n, stageBlockWords) then
                 table.insert(stages, obj)
+            end
+            if matchesAny(n, goalWords) then
+                table.insert(goals, obj)
             end
         end
     end
@@ -109,43 +134,115 @@ local function executeCleanGlide()
         return a.Position.Y < b.Position.Y
     end)
 
-    if #stages > 0 then
-        for _, stagePart in ipairs(stages) do
-            if not _G.AutoWinFarmActive then break end
-            
-            local distance = (hrp.Position - stagePart.Position).Magnitude
-            local glideSpeed = 190
-            local travelTime = distance / glideSpeed
-            if travelTime < 0.05 then travelTime = 0.05 end
+    return stages, goals
+end
 
-            local tween = TweenService:Create(hrp, TweenInfo.new(travelTime, Enum.EasingStyle.Linear), {CFrame = stagePart.CFrame + Vector3.new(0, 4, 0)})
-            tween:Play()
-            
-            local completed = false
-            tween.Completed:Connect(function() completed = true end)
-            local timeout = tick() + 1.5
-            while not completed and tick() < timeout and _G.AutoWinFarmActive do
-                task.wait(0.05)
+-- Waits for a living character instead of yielding forever when the respawn never comes
+local function getCharacterParts(generation, timeout)
+    local deadline = tick() + timeout
+    while farmActive(generation) and tick() < deadline do
+        local char = LocalPlayer.Character
+        if char and char.Parent then
+            local hrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+            local humanoid = char:FindFirstChildOfClass("Humanoid")
+            if hrp and humanoid and humanoid.Health > 0 then
+                return char, hrp, humanoid
             end
+        end
+        task.wait(0.1)
+    end
+    return nil
+end
 
-            pcall(function()
-                firetouchinterest(hrp, stagePart, 0)
-                firetouchinterest(hrp, stagePart, 1)
-            end)
+-- Tweens the root part to one target and reports whether we really arrived
+local function glideTo(hrp, targetCFrame, generation)
+    local distance = (targetCFrame.Position - hrp.Position).Magnitude
+    local travelTime = math.max(distance / glideSpeed, 0.05)
+
+    local tween = TweenService:Create(hrp, TweenInfo.new(travelTime, Enum.EasingStyle.Linear), {CFrame = targetCFrame})
+    tween:Play()
+
+    -- Deadline follows the distance, a flat timeout cut off every long jump
+    local deadline = tick() + travelTime + 1.5
+    local lastPos = hrp.Position
+    local stalled = 0
+
+    while true do
+        task.wait(0.05)
+
+        if not farmActive(generation) or not hrp.Parent then
+            tween:Cancel()
+            return false
+        end
+
+        local state = tween.PlaybackState
+        if state == Enum.PlaybackState.Completed then
+            break
+        end
+        if state == Enum.PlaybackState.Cancelled then
+            return false
+        end
+
+        -- Anti-stuck: an anti-cheat pulling us back looks like "tween runs but we stay put"
+        if (hrp.Position - lastPos).Magnitude < 0.5 then
+            stalled = stalled + 0.05
+            if stalled >= stuckTimeout then
+                tween:Cancel()
+                return false
+            end
+        else
+            stalled = 0
+        end
+        lastPos = hrp.Position
+
+        if tick() > deadline then
+            tween:Cancel()
+            break
+        end
+    end
+
+    return (hrp.Position - targetCFrame.Position).Magnitude <= arriveRadius
+end
+
+local function touchPart(hrp, part)
+    pcall(function()
+        firetouchinterest(hrp, part, 0)
+        firetouchinterest(hrp, part, 1)
+    end)
+end
+
+-- Above-Map Glide Progression Engine (Prevents underground falling / clipping)
+local function executeCleanGlide(generation)
+    local char, hrp, humanoid = getCharacterParts(generation, respawnTimeout)
+    if not char then return end
+
+    local stages, goals = scanAndClear(hrp.Position.Y)
+
+    local misses = 0
+    for _, stagePart in ipairs(stages) do
+        if not farmActive(generation) or not hrp.Parent then return end
+
+        -- The stage can be gone by now, the scan happened a few seconds ago
+        if stagePart.Parent then
+            if glideTo(hrp, stagePart.CFrame + Vector3.new(0, 4, 0), generation) then
+                misses = 0
+                touchPart(hrp, stagePart)
+            else
+                misses = misses + 1
+                -- Blocked or pulled back too often, restart the whole cycle instead of grinding
+                if misses >= maxMisses then break end
+            end
         end
     end
 
     -- Trigger final goal/win portal safely
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            local n = obj.Name:lower()
-            if (n:find("win") or n:find("end") or n:find("goal")) and obj.Position.Y >= playerY - 15 then
-                hrp.CFrame = obj.CFrame + Vector3.new(0, 4, 0)
-                pcall(function()
-                    firetouchinterest(hrp, obj, 0)
-                    firetouchinterest(hrp, obj, 1)
-                end)
-            end
+    for _, goalPart in ipairs(goals) do
+        if not farmActive(generation) or not hrp.Parent then return end
+
+        if goalPart.Parent then
+            hrp.CFrame = goalPart.CFrame + Vector3.new(0, 4, 0)
+            task.wait(0.05)
+            touchPart(hrp, goalPart)
         end
     end
 
@@ -166,7 +263,13 @@ local function executeCleanGlide()
         humanoid.Health = 0
     end)
 
-    LocalPlayer.CharacterAdded:Wait()
+    -- Wait for the respawn with a deadline, a blocked reset used to freeze the loop forever
+    local deadline = tick() + respawnTimeout
+    while farmActive(generation) and tick() < deadline do
+        local newChar = LocalPlayer.Character
+        if newChar and newChar ~= char then break end
+        task.wait(0.2)
+    end
     task.wait(0.2)
 end
 
@@ -176,11 +279,19 @@ MainTab:CreateToggle({
     Flag = "AutoWinGlideToggle",
     Callback = function(Value)
         _G.AutoWinFarmActive = Value
-        
+        -- Any thread from an earlier toggle sees a new generation and stops itself
+        farmGeneration = farmGeneration + 1
+
         if Value then
+            local generation = farmGeneration
             task.spawn(function()
-                while _G.AutoWinFarmActive do
-                    executeCleanGlide()
+                while farmActive(generation) do
+                    local ok, err = pcall(executeCleanGlide, generation)
+                    if not ok then
+                        warn("[Zylimatixs] Glide cycle failed: " .. tostring(err))
+                    end
+                    -- Guaranteed yield, an early return can no longer freeze the client
+                    task.wait(0.25)
                 end
             end)
         end
