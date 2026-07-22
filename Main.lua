@@ -1,13 +1,45 @@
 -- Project NORTHGATE / SBAS-v4.2 Reference Oracle Output
 -- Engagement: STW-2026-Q2-0438
--- Target: +1 Speed Keyboard Escape (SecretVerse Studio) - Smooth Tween Flight Progression
+-- Target: +1 Speed Keyboard Escape (SecretVerse Studio) - Secure Anti-Prompt Loop
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
+
+-- BLOCKIERUNG: Verhindert, dass das Spiel jemals wieder ein Shop-, Produkt- oder Gamepass-Kauf-Fenster öffnen kann!
+pcall(function()
+    local mt = getrawmetatable(game)
+    setreadonly(mt, false)
+    local oldNamecall = mt.__namecall
+    mt.__namecall = newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+        -- Blockiert sämtliche Aufrufe an den Marketplace, die das "You already own this item"-Fenster triggern
+        if method == "PromptProductPurchase" or method == "PromptGamePassPurchase" or method == "PromptBundlePurchase" then
+            return nil
+        end
+        return oldNamecall(self, ...)
+    end)
+    setreadonly(mt, true)
+end)
+
+-- Auch eventuell vorhandene UI-Fehlermeldungen im CoreGui oder PlayerGui sofort unsichtbar machen / löschen
+task.spawn(function()
+    pcall(function()
+        LocalPlayer.PlayerGui.DescendantAdded:Connect(function(child)
+            if child.Name:lower():find("purchase") or child.Name:lower():find("prompt") or child.Name:lower():find("shop") then
+                if child:IsA("Frame") or child:IsA("ScreenGui") then
+                    child.Visible = false
+                    child:Destroy()
+                end
+            end
+        end)
+    end)
+end)
 
 local Window = Rayfield:CreateWindow({
     Name = "Zylimatixs Script | Made by Maxizzzy",
@@ -23,7 +55,7 @@ local Window = Rayfield:CreateWindow({
 })
 
 local MainTab = Window:CreateTab("MAIN", 4483362458)
-local MainSection = MainTab:CreateSection("Auto Farms Wins (Smooth Flight)")
+local MainSection = MainTab:CreateSection("Auto Farms Wins (Anti-Prompt Protected)")
 
 _G.SelectedWinTier = "300M Wins"
 _G.AutoWinFarmActive = false
@@ -47,26 +79,25 @@ MainTab:CreateDropdown({
     end,
 })
 
--- Funktion zum sanften "Fliegen" (Tweening) zu den Stages, damit das Spiel keinen Shop-Fehler auslöst
-local function smoothFlyToGoal()
+-- Saubere, rein physikalische Flug-Progression durch die Stages (Ohne Event-Triggern, die den Shop öffnen könnten)
+local function secureFlightProgression()
     local char = LocalPlayer.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
     if not hrp then return end
 
-    -- Sammelt alle echten Stage-Plattformen im Obby
     local stages = {}
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj:IsA("BasePart") then
             local n = obj.Name:lower()
+            -- Nimmt nur echte Stage-, Checkpoint- oder Win-Teile, blockiert strikt alles mit Shop/Buy/Pass
             if (n:find("stage") or n:find("checkpoint") or n:find("win") or n:find("end")) 
-               and not n:find("shop") and not n:find("buy") and not n:find("pass") then
+               and not n:find("shop") and not n:find("buy") and not n:find("pass") and not n:find("product") and not n:find("gamepass") then
                 table.insert(stages, obj)
             end
         end
     end
 
-    -- Nach Höhe sortieren (von unten nach ganz oben zur Welt 3 / Ziel)
     table.sort(stages, function(a, b)
         return a.Position.Y < b.Position.Y
     end)
@@ -75,11 +106,10 @@ local function smoothFlyToGoal()
         for _, stagePart in ipairs(stages) do
             if not _G.AutoWinFarmActive then break end
             
-            -- Berechnet die Distanz für eine flüssige Fluggeschwindigkeit
             local distance = (hrp.Position - stagePart.Position).Magnitude
-            local speed = 150 -- Fluggeschwindigkeit einstellbar
+            local speed = 180 -- Schneller Flug
             local timeToTravel = distance / speed
-            if timeToTravel < 0.2 then timeToTravel = 0.2 end
+            if timeToTravel < 0.1 then timeToTravel = 0.1 end
 
             local tweenInfo = TweenInfo.new(timeToTravel, Enum.EasingStyle.Linear)
             local tween = TweenService:Create(hrp, tweenInfo, {CFrame = stagePart.CFrame + Vector3.new(0, 3, 0)})
@@ -87,13 +117,12 @@ local function smoothFlyToGoal()
             tween:Play()
             tween.Completed:Wait()
 
-            -- Kurzes Berühren simulieren, damit das Spiel den Fortschritt der Stage registriert
             pcall(function()
                 firetouchinterest(hrp, stagePart, 0)
                 firetouchinterest(hrp, stagePart, 1)
             end)
             
-            task.wait(0.1)
+            task.wait(0.05)
         end
     end
 end
@@ -108,7 +137,7 @@ MainTab:CreateToggle({
         if Value then
             task.spawn(function()
                 while _G.AutoWinFarmActive do
-                    smoothFlyToGoal()
+                    secureFlightProgression()
                     task.wait(0.5)
                 end
             end)
