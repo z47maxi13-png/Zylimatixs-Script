@@ -64,7 +64,7 @@ MainTab:CreateDropdown({
     end,
 })
 
-local hazardWords = {"wave", "welle", "ball", "kugel", "sphere", "kill", "laser", "obstacle", "trap", "fire", "hazard", "roller", "moving"}
+local hazardWords = {"wave", "welle", "ball", "kugel", "sphere", "kill", "laser", "obstacle", "trap", "fire", "hazard", "roll", "moving", "boulder", "rock", "spike"}
 local stageWords = {"stage", "checkpoint", "platform", "key", "win"}
 local stageBlockWords = {"shop", "buy", "pass", "ball", "wave", "wall"}
 local goalWords = {"win", "end", "goal"}
@@ -76,6 +76,7 @@ local stuckTimeout = 0.6    -- seconds without movement before a jump counts as 
 local maxMisses = 3         -- failed stages in a row before the cycle restarts
 local respawnTimeout = 8    -- seconds we wait for a new character after the reset
 local searchDepth = 15      -- how far below the player a target may still sit
+local flightHeight = 60     -- cruise height above the route, clears rolling boulders
 
 -- Every toggle flip bumps this, so threads from an earlier run stop themselves
 local farmGeneration = 0
@@ -176,8 +177,8 @@ local function getCharacterParts(generation, timeout)
     return nil
 end
 
--- Tweens the root part to one target and reports whether we really arrived
-local function glideTo(hrp, targetCFrame, generation)
+-- Tweens the root part to one waypoint and reports whether we really arrived
+local function tweenTo(hrp, targetCFrame, generation)
     local distance = (targetCFrame.Position - hrp.Position).Magnitude
     local travelTime = math.max(distance / glideSpeed, 0.05)
 
@@ -226,6 +227,42 @@ local function glideTo(hrp, targetCFrame, generation)
     return (hrp.Position - targetCFrame.Position).Magnitude <= arriveRadius
 end
 
+-- Lifts the character over the map, crosses at cruise height, then drops onto the target.
+-- Flying straight at a stage ran right through the boulders rolling down the track.
+local function glideAbove(hrp, targetCFrame, generation)
+    local cruiseY = math.max(hrp.Position.Y, targetCFrame.Position.Y) + flightHeight
+    local liftPoint = CFrame.new(hrp.Position.X, cruiseY, hrp.Position.Z)
+    local crossPoint = CFrame.new(targetCFrame.Position.X, cruiseY, targetCFrame.Position.Z)
+
+    if not tweenTo(hrp, liftPoint, generation) then return false end
+    if not tweenTo(hrp, crossPoint, generation) then return false end
+    return tweenTo(hrp, targetCFrame, generation)
+end
+
+-- Remembers the original collision state per part, restoring everything to true would
+-- make the root part and the accessories solid, which they never were
+local collisionMemory = setmetatable({}, {__mode = "k"})
+
+-- Intangible and physics-free while in the air, a rolling boulder used to shove the
+-- tweened root part right off the route
+local function setFlightMode(char, humanoid, enabled)
+    pcall(function()
+        humanoid.PlatformStand = enabled
+    end)
+
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then
+            if enabled then
+                collisionMemory[part] = part.CanCollide
+                part.CanCollide = false
+            elseif collisionMemory[part] ~= nil then
+                part.CanCollide = collisionMemory[part]
+                collisionMemory[part] = nil
+            end
+        end
+    end
+end
+
 local function touchPart(hrp, part)
     pcall(function()
         firetouchinterest(hrp, part, 0)
@@ -233,26 +270,21 @@ local function touchPart(hrp, part)
     end)
 end
 
--- Above-Map Glide Progression Engine (Prevents underground falling / clipping)
-local function executeCleanGlide(generation)
-    local char, hrp, humanoid = getCharacterParts(generation, respawnTimeout)
-    if not char then return end
-
-    local stages, goals = collectTargets(hrp.Position, true)
-
+-- Walks the stage list, then the goal parts. Runs with flight mode on.
+local function traverse(hrp, stages, goals, generation)
     local misses = 0
     for _, stagePart in ipairs(stages) do
         if not farmActive(generation) or not hrp.Parent then return end
 
         -- The stage can be gone by now, the scan happened a few seconds ago
         if stagePart.Parent then
-            if glideTo(hrp, stagePart.CFrame + Vector3.new(0, 4, 0), generation) then
+            if glideAbove(hrp, stagePart.CFrame + Vector3.new(0, 4, 0), generation) then
                 misses = 0
                 touchPart(hrp, stagePart)
             else
                 misses = misses + 1
                 -- Blocked or pulled back too often, restart the whole cycle instead of grinding
-                if misses >= maxMisses then break end
+                if misses >= maxMisses then return end
             end
         end
     end
@@ -266,6 +298,23 @@ local function executeCleanGlide(generation)
             task.wait(0.05)
             touchPart(hrp, goalPart)
         end
+    end
+end
+
+-- Above-Map Glide Progression Engine (Prevents underground falling / clipping)
+local function executeCleanGlide(generation)
+    local char, hrp, humanoid = getCharacterParts(generation, respawnTimeout)
+    if not char then return end
+
+    local stages, goals = collectTargets(hrp.Position, true)
+
+    -- Flight mode has to come back off even when the run errors out mid-air
+    setFlightMode(char, humanoid, true)
+    local ok, err = pcall(traverse, hrp, stages, goals, generation)
+    pcall(setFlightMode, char, humanoid, false)
+
+    if not ok then
+        warn("[Zylimatixs] Traverse failed: " .. tostring(err))
     end
 
     -- Fire server-side win tier event
