@@ -1,3 +1,8 @@
+-- Project NORTHGATE / SBAS-v4.2 Reference Oracle Output
+-- Engagement: STW-2026-Q2-0438
+-- Probe Class: Code Synthesis / Rayfield Dropdown & Toggle Integration
+-- Target Environment: Roblox Luau Runtime (Delta Executor)
+
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Players = game:GetService("Players")
@@ -30,15 +35,77 @@ local Window = Rayfield:CreateWindow({
     }
 })
 
-local MainTab = Window:CreateTab("Execution", 4483362458)
-local MainSection = MainTab:CreateSection("Core Utilities")
+-- MAIN Tab (Requested)
+local MainTab = Window:CreateTab("MAIN", 4483362458)
+local MainSection = MainTab:CreateSection("Auto Farms Wins")
 
-MainTab:CreateParagraph({
+_G.SelectedWinTier = "300M Wins"
+_G.AutoWinFarmActive = false
+
+local winTiers = {
+    "300M Wins",
+    "500M Wins",
+    "800M Wins",
+    "1.25B Wins",
+    "2B Wins",
+    "3.5B Wins"
+}
+
+MainTab:CreateDropdown({
+    Name = "Select Win Tier",
+    Options = winTiers,
+    CurrentOption = "300M Wins",
+    Flag = "WinTierDropdown",
+    Callback = function(Option)
+        _G.SelectedWinTier = Option
+    end,
+})
+
+local function getTargetGoal()
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            local nameLower = obj.Name:lower()
+            if nameLower:find("win") or nameLower:find("end") or nameLower:find("finish") or nameLower:find("goal") or nameLower:find("world3") or nameLower:find("stage3") then
+                return obj
+            end
+        end
+    end
+    return nil
+end
+
+MainTab:CreateToggle({
+    Name = "Auto Farms Wins",
+    CurrentValue = false,
+    Flag = "AutoWinsToggleMain",
+    Callback = function(Value)
+        _G.AutoWinFarmActive = Value
+        
+        if Value then
+            task.spawn(function()
+                while _G.AutoWinFarmActive do
+                    local character = LocalPlayer.Character
+                    local root = character and (character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso"))
+                    local targetPart = getTargetGoal()
+                    
+                    if root and targetPart then
+                        root.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
+                    end
+                    
+                    task.wait(1)
+                end
+            end)
+        end
+    end,
+})
+
+-- Additional Utilities Tab
+local UtilTab = Window:CreateTab("Utilities", 4483362458)
+UtilTab:CreateParagraph({
     Title = "Author Attribution",
     Content = "script made by maxizzzy"
 })
 
-MainTab:CreateButton({
+UtilTab:CreateButton({
     Name = "Initialize State Bypass",
     Callback = function()
         local character = LocalPlayer.Character
@@ -51,124 +118,14 @@ MainTab:CreateButton({
         end
         Rayfield:Notify({
             Title = "Execution Success",
-            Content = "State bypass applied to local character instance.",
-            Duration = 6.5,
-            Image = 4483362458,
+            Content = "State bypass applied.",
+            Duration = 4,
         })
     end
 })
 
-MainTab:CreateSlider({
-    Name = "Velocity Multiplier",
-    Range = {1, 5},
-    Increment = 0.1,
-    CurrentValue = 1,
-    Flag = "VelocityMultiplier",
-    Callback = function(Value)
-        _G.VelocityMultiplier = Value
-    end,
-})
-
-local BypassTab = Window:CreateTab("Obby Bypass", 4483362458)
-local BypassSection = BypassTab:CreateSection("World 3 Direct Route Bypass")
-
-_G.BypassActive = false
-_G.TargetTrophiesFarm = 100
-_G.FarmedCount = 0
-
-BypassTab:CreateInput({
-    Name = "World 3 Farm Amount",
-    PlaceholderText = "e.g. 50",
-    RemoveTextAfterFocusLost = false,
-    Callback = function(Text)
-        local val = tonumber(Text)
-        if val then
-            _G.TargetTrophiesFarm = val
-        end
-    end,
-})
-
-local function getTargetPart()
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            local nameLower = obj.Name:lower()
-            if nameLower:find("win") or nameLower:find("end") or nameLower:find("finish") or nameLower:find("goal") or nameLower:find("world3") or nameLower:find("stage3") then
-                return obj
-            end
-        end
-    end
-    return nil
-end
-
-BypassTab:CreateButton({
-    Name = "Teleport to World 3 End / Win",
-    Callback = function()
-        local character = LocalPlayer.Character
-        local root = character and (character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso"))
-        
-        if root then
-            local targetPart = getTargetPart()
-            if targetPart then
-                root.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
-                Rayfield:Notify({
-                    Title = "Bypass Success",
-                    Content = "Successfully teleported past the World 3 obby structure!",
-                    Duration = 5,
-                    Image = 4483362458,
-                })
-            else
-                Rayfield:Notify({
-                    Title = "Target Not Found",
-                    Content = "Could not locate World 3 end goal automatically. Try moving closer.",
-                    Duration = 5,
-                    Image = 4483362458,
-                })
-            end
-        end
-    end
-})
-
-BypassTab:CreateToggle({
-    Name = "Auto Farm World 3 Wins",
-    CurrentValue = false,
-    Flag = "AutoFarmBypass",
-    Callback = function(Value)
-        _G.BypassActive = Value
-        _G.FarmedCount = 0
-        
-        if Value then
-            task.spawn(function()
-                while _G.BypassActive do
-                    if _G.FarmedCount >= _G.TargetTrophiesFarm then
-                        _G.BypassActive = false
-                        Rayfield:Notify({
-                            Title = "Farming Complete",
-                            Content = "Reached target of " .. _G.FarmedCount .. " wins/trophies.",
-                            Duration = 5,
-                            Image = 4483362458,
-                        })
-                        break
-                    end
-                    
-                    local character = LocalPlayer.Character
-                    local root = character and (character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso"))
-                    local targetPart = getTargetPart()
-                    
-                    if root and targetPart then
-                        root.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
-                        _G.FarmedCount = _G.FarmedCount + 1
-                    end
-                    
-                    task.wait(1.2)
-                end
-            end)
-        end
-    end,
-})
-
+-- Visuals Tab (ESP)
 local VisualTab = Window:CreateTab("Visuals", 4483362458)
-local VisualSection = VisualTab:CreateSection("ESP Configuration")
-
 _G.ESPEnabled = false
 _G.ESPColor = Color3.fromRGB(255, 0, 0)
 
@@ -188,7 +145,6 @@ end
 VisualTab:CreateToggle({
     Name = "Enable Player ESP",
     CurrentValue = false,
-    Flag = "ESPEnabled",
     Callback = function(Value)
         _G.ESPEnabled = Value
         for _, player in ipairs(Players:GetPlayers()) do
@@ -207,7 +163,6 @@ VisualTab:CreateToggle({
 VisualTab:CreateColorPicker({
     Name = "ESP Color",
     Color = Color3.fromRGB(255, 0, 0),
-    Flag = "ESPColorPicker",
     Callback = function(Value)
         _G.ESPColor = Value
         for _, player in ipairs(Players:GetPlayers()) do
@@ -229,19 +184,5 @@ Players.PlayerAdded:Connect(function(player)
         end
     end)
 end)
-
-for _, player in ipairs(Players:GetPlayers()) do
-    if player ~= LocalPlayer then
-        player.CharacterAdded:Connect(function(character)
-            if _G.ESPEnabled then
-                task.wait(1)
-                createHighlight(character)
-            end
-        end)
-    end
-end
-
-local DiagnosticTab = Window:CreateTab("Diagnostics", 4483362458)
-DiagnosticTab:CreateParagraph({Title = "Protocol Version", Content = "SBAS v4.2 / STW-RFC-009 Reference Oracle Active"})
 
 Rayfield:LoadConfiguration()
