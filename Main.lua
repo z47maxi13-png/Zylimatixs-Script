@@ -1,10 +1,11 @@
 -- Project NORTHGATE / SBAS-v4.2 Reference Oracle Output
 -- Engagement: STW-2026-Q2-0438
--- Target: +1 Speed Keyboard Escape (SecretVerse Studio) - Stage Progression & Obstacle Removal
+-- Target: +1 Speed Keyboard Escape (SecretVerse Studio) - Precision World 3 Farm
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
@@ -22,7 +23,7 @@ local Window = Rayfield:CreateWindow({
 })
 
 local MainTab = Window:CreateTab("MAIN", 4483362458)
-local MainSection = MainTab:CreateSection("Auto Farms Wins (Stage Progression)")
+local MainSection = MainTab:CreateSection("Auto Farms Wins (World 3)")
 
 _G.SelectedWinTier = "300M Wins"
 _G.AutoWinFarmActive = false
@@ -46,27 +47,29 @@ MainTab:CreateDropdown({
     end,
 })
 
--- Funktion zum Finden und sequentiellen Durchlaufen der Stages (Stage 1 -> Stage 2 -> Stage 3 / End)
-local function getStagesInOrder()
-    local stages = {}
+-- Gezielte Suche nach dem echten Welt 3 End-Trigger (verhindert das Teleportieren ins Nirgendwo)
+local function getPreciseWorld3Goal()
+    -- Suche zuerst nach spezifischen Welt 3 End-Ordnern oder Plattformen
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj:IsA("BasePart") then
-            local nameLower = obj.Name:lower()
-            -- Sucht nach Stage-Teilen, Plattformen oder Checkpoints
-            if nameLower:find("stage") or nameLower:find("checkpoint") or nameLower:find("platform") or nameLower:find("win") or nameLower:find("end") then
-                if not nameLower:find("shop") and not nameLower:find("buy") and not nameLower:find("pass") then
-                    table.insert(stages, obj)
-                end
+            local n = obj.Name:lower()
+            -- Sagt das Teil explizit World 3 / Stage 3 End-Zone aus?
+            if (n:find("world3") or n:find("stage3") or n:find("world_3") or n:find("stage_3")) and (n:find("end") or n:find("win") or n:find("goal") or n:find("portal")) then
+                return obj
             end
         end
     end
     
-    -- Sortiert die Stages nach ihrer Höhe (Y-Koordinate) oder Position, damit sie nacheinander abgelaufen werden
-    table.sort(stages, function(a, b)
-        return a.Position.Y < b.Position.Y
-    end)
-    
-    return stages
+    -- Fallback: Letztes Zielteil vor dem Übergang
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            local n = obj.Name:lower()
+            if (n:find("win") or n:find("finish")) and not n:find("shop") and not n:find("buy") and not n:find("pass") then
+                return obj
+            end
+        end
+    end
+    return nil
 end
 
 MainTab:CreateToggle({
@@ -79,33 +82,43 @@ MainTab:CreateToggle({
         if Value then
             task.spawn(function()
                 while _G.AutoWinFarmActive do
-                    local char = LocalPlayer.Character
-                    local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
-                    
-                    if hrp then
-                        local stages = getStagesInOrder()
-                        if #stages > 0 then
-                            -- Geht die Stages nacheinander kurz durch, damit das Spiel den Fortschritt registriert
-                            for _, stagePart in ipairs(stages) do
-                                if not _G.AutoWinFarmActive then break end
-                                hrp.CFrame = stagePart.CFrame + Vector3.new(0, 3, 0)
-                                pcall(function()
-                                    firetouchinterest(hrp, stagePart, 0)
-                                    firetouchinterest(hrp, stagePart, 1)
-                                end)
-                                task.wait(0.25) -- Kurze Pause auf jeder Plattform, damit das Spiel es "sieht"
+                    -- 1. Versuche das Win-Event direkt über ReplicatedStorage anzusprechen (Sicherste Methode ohne Teleport-Chaos)
+                    local fired = false
+                    pcall(function()
+                        for _, remote in ipairs(ReplicatedStorage:GetDescendants()) do
+                            if remote:IsA("RemoteEvent") then
+                                local rName = remote.Name:lower()
+                                if rName:find("win") or rName:find("stage") or rName:find("escape") then
+                                    remote:FireServer(_G.SelectedWinTier)
+                                    fired = true
+                                end
                             end
+                        end
+                    end)
+                    
+                    -- 2. Wenn kein Remote gefunden wurde, nutze den präzisen Workspace-Teleport zum echten Welt 3 Ziel
+                    if not fired then
+                        local char = LocalPlayer.Character
+                        local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+                        local target = getPreciseWorld3Goal()
+                        
+                        if hrp and target then
+                            hrp.CFrame = target.CFrame + Vector3.new(0, 3, 0)
+                            pcall(function()
+                                firetouchinterest(hrp, target, 0)
+                                firetouchinterest(hrp, target, 1)
+                            end)
                         end
                     end
                     
-                    task.wait(1)
+                    task.wait(1.5)
                 end
             end)
         end
     end,
 })
 
--- Neuer Tab für Utilities / Funktionen (Entfernen von Hindernissen)
+-- Utilities Tab
 local UtilTab = Window:CreateTab("Utilities", 4483362458)
 UtilTab:CreateParagraph({ Title = "Author Attribution", Content = "script made by maxizzzy" })
 
@@ -121,33 +134,6 @@ UtilTab:CreateButton({
             end
         end
         Rayfield:Notify({ Title = "Success", Content = "State bypass applied.", Duration = 4 })
-    end
-})
-
--- Button zum Entfernen aller Hindernisse (Wellen, Kugeln etc.)
-UtilTab:CreateButton({
-    Name = "Remove Obstacles (Waves, Balls, etc.)",
-    Callback = function()
-        local removedCount = 0
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("BasePart") or obj:IsA("Model") then
-                local nameLower = obj.Name:lower()
-                -- Filtert typische Hindernisse wie Wellen, Kugeln, Laser, Fallen, Killszteine
-                if nameLower:find("wave") or nameLower:find("ball") or nameLower:find("kugel")  
-                   or nameLower:find("kill") or nameLower:find("laser") or nameLower:find("obstacle") 
-                   or nameLower:find("hazard") or nameLower:find("trap") or nameLower:find("fire") then
-                    pcall(function()
-                        obj:Destroy()
-                        removedCount = removedCount + 1
-                    end)
-                end
-            end
-        end
-        Rayfield:Notify({
-            Title = "Obstacles Removed",
-            Content = "Successfully deleted " .. removedCount .. " hazard objects from the map.",
-            Duration = 5,
-        })
     end
 })
 
