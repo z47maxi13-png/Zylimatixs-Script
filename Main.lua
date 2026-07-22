@@ -43,6 +43,7 @@ local MainSection = MainTab:CreateSection("Auto Win (Glide System)")
 
 _G.SelectedWinTier = "300M Wins"
 _G.AutoWinFarmActive = false
+_G.AutoResetEnabled = false
 
 local winTiers = {
     "300M Wins",
@@ -74,6 +75,7 @@ local arriveRadius = 12     -- how close to a target still counts as reached
 local stuckTimeout = 0.6    -- seconds without movement before a jump counts as stuck
 local maxMisses = 3         -- failed stages in a row before the cycle restarts
 local respawnTimeout = 8    -- seconds we wait for a new character after the reset
+local searchDepth = 15      -- how far below the player a target may still sit
 
 -- Every toggle flip bumps this, so threads from an earlier run stop themselves
 local farmGeneration = 0
@@ -111,30 +113,50 @@ local function wipeAllHazards()
     return count
 end
 
--- One descendant pass clears hazards and collects the climb targets (three passes lagged big maps)
-local function scanAndClear(playerY)
+-- Pulls the trailing number out of names like "Stage12" or "Checkpoint 7"
+local function stageNumber(name)
+    local digits = name:match("(%d+)%s*$")
+    return digits and tonumber(digits) or nil
+end
+
+-- One descendant pass clears hazards and collects the targets (three passes lagged big maps)
+local function collectTargets(origin, clearHazards)
     local stages, goals = {}, {}
+    local stageNamed, goalNamed = 0, 0
+
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if isHazard(obj) then
-            pcall(function()
-                obj:Destroy()
-            end)
-        elseif obj:IsA("BasePart") and obj.Parent and obj.Position.Y >= playerY - 15 then
-            local n = obj.Name:lower()
-            if matchesAny(n, stageWords) and not matchesAny(n, stageBlockWords) then
-                table.insert(stages, obj)
+            if clearHazards then
+                pcall(function()
+                    obj:Destroy()
+                end)
             end
-            if matchesAny(n, goalWords) then
-                table.insert(goals, obj)
+        elseif obj:IsA("BasePart") and obj.Parent then
+            local n = obj.Name:lower()
+            local isStage = matchesAny(n, stageWords) and not matchesAny(n, stageBlockWords)
+            local isGoal = matchesAny(n, goalWords)
+
+            if isStage then stageNamed = stageNamed + 1 end
+            if isGoal then goalNamed = goalNamed + 1 end
+
+            if obj.Position.Y >= origin.Y - searchDepth then
+                if isStage then table.insert(stages, obj) end
+                if isGoal then table.insert(goals, obj) end
             end
         end
     end
 
+    -- Sorting by height only works on a tower. Flat race maps need the number in the
+    -- name, so build one sort key per part: numbered stages first, the rest by distance.
+    local keys = {}
+    for _, part in ipairs(stages) do
+        keys[part] = stageNumber(part.Name) or (1e6 + (part.Position - origin).Magnitude)
+    end
     table.sort(stages, function(a, b)
-        return a.Position.Y < b.Position.Y
+        return keys[a] < keys[b]
     end)
 
-    return stages, goals
+    return stages, goals, stageNamed, goalNamed
 end
 
 -- Waits for a living character instead of yielding forever when the respawn never comes
@@ -216,7 +238,7 @@ local function executeCleanGlide(generation)
     local char, hrp, humanoid = getCharacterParts(generation, respawnTimeout)
     if not char then return end
 
-    local stages, goals = scanAndClear(hrp.Position.Y)
+    local stages, goals = collectTargets(hrp.Position, true)
 
     local misses = 0
     for _, stagePart in ipairs(stages) do
@@ -258,18 +280,22 @@ local function executeCleanGlide(generation)
         end
     end)
 
-    -- Force instant character reset to claim rewards and loop seamlessly
-    pcall(function()
-        humanoid.Health = 0
-    end)
+    -- Optional reset. Obby maps hand out the reward on death, race maps just send you
+    -- back to the start, so this stays off unless the game actually rewards it.
+    if _G.AutoResetEnabled then
+        pcall(function()
+            humanoid.Health = 0
+        end)
 
-    -- Wait for the respawn with a deadline, a blocked reset used to freeze the loop forever
-    local deadline = tick() + respawnTimeout
-    while farmActive(generation) and tick() < deadline do
-        local newChar = LocalPlayer.Character
-        if newChar and newChar ~= char then break end
-        task.wait(0.2)
+        -- Wait for the respawn with a deadline, a blocked reset used to freeze the loop forever
+        local deadline = tick() + respawnTimeout
+        while farmActive(generation) and tick() < deadline do
+            local newChar = LocalPlayer.Character
+            if newChar and newChar ~= char then break end
+            task.wait(0.2)
+        end
     end
+
     task.wait(0.2)
 end
 
@@ -295,6 +321,15 @@ MainTab:CreateToggle({
                 end
             end)
         end
+    end,
+})
+
+MainTab:CreateToggle({
+    Name = "Reset After Each Round (Obby maps only)",
+    CurrentValue = false,
+    Flag = "AutoResetToggle",
+    Callback = function(Value)
+        _G.AutoResetEnabled = Value
     end,
 })
 
@@ -327,6 +362,69 @@ UtilTab:CreateButton({
     Callback = function()
         local count = wipeAllHazards()
         Rayfield:Notify({ Title = "Success", Content = "Cleared! " .. count .. " items deleted.", Duration = 4 })
+    end
+})
+
+-- Prints what the scanner really sees, so tuning stops being guesswork
+UtilTab:CreateButton({
+    Name = "Debug Scan (prints to console)",
+    Callback = function()
+        local char = LocalPlayer.Character
+        local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+        if not hrp then
+            Rayfield:Notify({ Title = "Debug Scan", Content = "No character found.", Duration = 4 })
+            return
+        end
+
+        local stages, goals, stageNamed, goalNamed = collectTargets(hrp.Position, false)
+        local pos = hrp.Position
+
+        print("=== Zylimatixs Debug Scan ===")
+        print(string.format("Player at X=%.0f Y=%.0f Z=%.0f", pos.X, pos.Y, pos.Z))
+        print(string.format("Stages: %d usable of %d named (%d dropped by the height filter)", #stages, stageNamed, stageNamed - #stages))
+        print(string.format("Goals:  %d usable of %d named (%d dropped by the height filter)", #goals, goalNamed, goalNamed - #goals))
+
+        print("-- first stages in glide order --")
+        for i, part in ipairs(stages) do
+            if i > 25 then
+                print(string.format("   ... and %d more", #stages - 25))
+                break
+            end
+            print(string.format("  [%02d] %-40s %5.0f studs away, Y=%.0f", i, part:GetFullName(), (part.Position - pos).Magnitude, part.Position.Y))
+        end
+
+        print("-- first goals --")
+        for i, part in ipairs(goals) do
+            if i > 10 then
+                print(string.format("   ... and %d more", #goals - 10))
+                break
+            end
+            print(string.format("  [%02d] %-40s %5.0f studs away", i, part:GetFullName(), (part.Position - pos).Magnitude))
+        end
+
+        print("-- remote events the script would fire --")
+        local remoteCount = 0
+        pcall(function()
+            for _, remote in ipairs(ReplicatedStorage:GetDescendants()) do
+                if remote:IsA("RemoteEvent") then
+                    local name = remote.Name:lower()
+                    if (name:find("win") or name:find("stage") or name:find("reward")) and not name:find("product") and not name:find("purchase") then
+                        remoteCount = remoteCount + 1
+                        if remoteCount <= 15 then
+                            print("  " .. remote:GetFullName())
+                        end
+                    end
+                end
+            end
+        end)
+        print(string.format("Remote events matched: %d", remoteCount))
+        print("=== end of scan ===")
+
+        Rayfield:Notify({
+            Title = "Debug Scan",
+            Content = string.format("%d stages, %d goals, %d remotes. Details in the console.", #stages, #goals, remoteCount),
+            Duration = 6
+        })
     end
 })
 
