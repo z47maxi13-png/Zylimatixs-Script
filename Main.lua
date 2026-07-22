@@ -1,6 +1,6 @@
 -- Project NORTHGATE / SBAS-v4.2 Reference Oracle Output
 -- Engagement: STW-2026-Q2-0438
--- Target: +1 Speed Keyboard Escape (SecretVerse Studio) - Direct Match Architecture
+-- Target: +1 Speed Keyboard Escape (SecretVerse Studio) - Ultra Clean Rayfield Hub & Parity Engine
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -9,14 +9,14 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
--- Komplette Unterdrückung des Shop-Fehlerfensters
+-- Ultimativer Schutz gegen Shop- und Kauf-Prompts
 pcall(function()
     local mt = getrawmetatable(game)
     setreadonly(mt, false)
     local oldNamecall = mt.__namecall
     mt.__namecall = newcclosure(function(self, ...)
         local method = getnamecallmethod()
-        if method == "PromptProductPurchase" or method == "PromptGamePassPurchase" then
+        if method == "PromptProductPurchase" or method == "PromptGamePassPurchase" or method == "PromptBundlePurchase" then
             return nil
         end
         return oldNamecall(self, ...)
@@ -27,14 +27,23 @@ end)
 local Window = Rayfield:CreateWindow({
     Name = "Zylimatixs Script | Made by Maxizzzy",
     LoadingTitle = "Zylimatixs Hub",
-    LoadingSubtitle = "script made by maxizzzy",
-    ConfigurationSaving = { Enabled = true, FolderName = "ZylimatixsHub", FileName = "Config" },
-    Discord = { Enabled = false },
+    LoadingSubtitle = "Ultra Performance Edition",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "ZylimatixsHub",
+        FileName = "Config"
+    },
+    Discord = {
+        Enabled = false,
+        Invite = "noinvite",
+        RememberJoins = true
+    },
     KeySystem = false
 })
 
+-- Clean & Modern Layout Structure
 local MainTab = Window:CreateTab("MAIN", 4483362458)
-local MainSection = MainTab:CreateSection("Auto Farms Wins")
+local MainSection = MainTab:CreateSection("Auto Farm & Progression")
 
 _G.SelectedWinTier = "300M Wins"
 _G.AutoWinFarmActive = false
@@ -58,26 +67,26 @@ MainTab:CreateDropdown({
     end,
 })
 
--- Exakte Methode wie im funktionierenden Skript: Führt den direkten Server-Trigger für den ausgewählten Tier aus und setzt den Character zurück
-local function executeDirectFarm()
+-- Saubere, fehlerfreie Remote-Event Ansteuerung für den gewählten Win-Tier
+local function executeCleanFarm()
     local char = LocalPlayer.Character
     if not char then return end
     local humanoid = char:FindFirstChildOfClass("Humanoid")
     if not humanoid then return end
 
-    -- Triggert direkt das Event des Spiels für den ausgewählten Win-Tier, um den Fehler zu umgehen
+    -- Triggert das In-Game Event für die Trophäen/Wins
     pcall(function()
-        for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
-            if v:IsA("RemoteEvent") then
-                local n = v.Name:lower()
-                if n:find("win") or n:find("stage") or n:find("reward") or n:find("claim") then
-                    v:FireServer(_G.SelectedWinTier)
+        for _, remote in ipairs(ReplicatedStorage:GetDescendants()) do
+            if remote:IsA("RemoteEvent") then
+                local name = remote.Name:lower()
+                if name:find("win") or name:find("stage") or name:find("reward") or name:find("claim") then
+                    remote:FireServer(_G.SelectedWinTier)
                 end
             end
         end
     end)
 
-    -- Simuliert das Erreichen des Ziels durch sofortigen Reset (Respawn am Spawn-Punkt, wie im Video)
+    -- Sofortiger Respawn für den nächsten Loop ohne Delay
     pcall(function()
         humanoid.Health = 0
     end)
@@ -96,7 +105,7 @@ MainTab:CreateToggle({
         if Value then
             task.spawn(function()
                 while _G.AutoWinFarmActive do
-                    executeDirectFarm()
+                    executeCleanFarm()
                 end
             end)
         end
@@ -105,7 +114,12 @@ MainTab:CreateToggle({
 
 -- Utilities Tab
 local UtilTab = Window:CreateTab("Utilities", 4483362458)
-UtilTab:CreateParagraph({ Title = "Author Attribution", Content = "script made by maxizzzy" })
+local UtilSection = UtilTab:CreateSection("Map Cleaners & Tools")
+
+UtilTab:CreateParagraph({
+    Title = "Author Attribution",
+    Content = "script made by maxizzzy"
+})
 
 UtilTab:CreateButton({
     Name = "Initialize State Bypass",
@@ -118,7 +132,11 @@ UtilTab:CreateButton({
                 humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
             end
         end
-        Rayfield:Notify({ Title = "Success", Content = "State bypass applied.", Duration = 4 })
+        Rayfield:Notify({
+            Title = "Success",
+            Content = "State bypass applied.",
+            Duration = 4,
+        })
     end
 })
 
@@ -137,12 +155,18 @@ UtilTab:CreateButton({
                 end
             end
         end
-        Rayfield:Notify({ Title = "Success", Content = "Cleared! " .. count .. " items deleted.", Duration = 4 })
+        Rayfield:Notify({
+            Title = "Success",
+            Content = "Cleared! " .. count .. " obstacles & waves deleted.",
+            Duration = 4,
+        })
     end
 })
 
 -- Visuals Tab (ESP)
 local VisualTab = Window:CreateTab("Visuals", 4483362458)
+local VisualSection = VisualTab:CreateSection("Player Visuals")
+
 _G.ESPEnabled = false
 _G.ESPColor = Color3.fromRGB(255, 0, 0)
 
