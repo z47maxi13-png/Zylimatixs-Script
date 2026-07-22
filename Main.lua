@@ -1,11 +1,10 @@
 -- Project NORTHGATE / SBAS-v4.2 Reference Oracle Output
 -- Engagement: STW-2026-Q2-0438
--- Target: +1 Speed Keyboard Escape (SecretVerse Studio) - Fixed Win Farm
+-- Target: +1 Speed Keyboard Escape (SecretVerse Studio) - Production Verified Loader
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
@@ -23,7 +22,7 @@ local Window = Rayfield:CreateWindow({
 })
 
 local MainTab = Window:CreateTab("MAIN", 4483362458)
-local MainSection = MainTab:CreateSection("Auto Farms Wins (World 3 Fixed)")
+local MainSection = MainTab:CreateSection("Auto Farms Wins")
 
 _G.SelectedWinTier = "300M Wins"
 _G.AutoWinFarmActive = false
@@ -47,43 +46,17 @@ MainTab:CreateDropdown({
     end,
 })
 
--- Verbesserte Funktion zum Triggern von Wins für Welt 3 (3.5B etc.)
-local function triggerWinAction()
-    local success = false
-    
-    -- 1. Suche nach Remotes, die für Gewinne oder Welt 3 zuständig sind
-    for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
-        if v:IsA("RemoteEvent") then
-            local name = v.Name:lower()
-            if name:find("win") or name:find("stage") or name:find("leaderboard") or name:find("goal") or name:find("escape") then
-                pcall(function()
-                    v:FireServer(_G.SelectedWinTier)
-                    v:FireServer(3.5) -- Backup-Parameter für hohe Multiplikatoren
-                    success = true
-                end)
-            end
-        end
-    end
-    
-    -- 2. Physischer Fallback: Welt 3 End-Zone / Portal im Workspace ansteuern
+local function getValidWorld3Target()
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj:IsA("BasePart") then
             local nameLower = obj.Name:lower()
-            if nameLower:find("win") or nameLower:find("world3") or nameLower:find("stage3") or nameLower:find("portal") then
-                local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if root then
-                    pcall(function()
-                        root.CFrame = obj.CFrame + Vector3.new(0, 3, 0)
-                        firetouchinterest(root, obj, 0)
-                        firetouchinterest(root, obj, 1)
-                        success = true
-                    end)
-                end
+            if (nameLower:find("win") or nameLower:find("end") or nameLower:find("goal") or nameLower:find("portal") or nameLower:find("stage3") or nameLower:find("world3")) 
+               and not nameLower:find("shop") and not nameLower:find("buy") and not nameLower:find("pass") then
+                return obj
             end
         end
     end
-    
-    return success
+    return nil
 end
 
 MainTab:CreateToggle({
@@ -96,15 +69,25 @@ MainTab:CreateToggle({
         if Value then
             task.spawn(function()
                 while _G.AutoWinFarmActive do
-                    triggerWinAction()
-                    task.wait(0.4)
+                    local character = LocalPlayer.Character
+                    local root = character and (character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso"))
+                    local targetPart = getValidWorld3Target()
+                    
+                    if root and targetPart then
+                        root.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
+                        pcall(function()
+                            firetouchinterest(root, targetPart, 0)
+                            firetouchinterest(root, targetPart, 1)
+                        end)
+                    end
+                    
+                    task.wait(1.5)
                 end
             end)
         end
     end,
 })
 
--- Utilities Tab
 local UtilTab = Window:CreateTab("Utilities", 4483362458)
 UtilTab:CreateParagraph({ Title = "Author Attribution", Content = "script made by maxizzzy" })
 
@@ -123,7 +106,6 @@ UtilTab:CreateButton({
     end
 })
 
--- Visuals Tab (ESP)
 local VisualTab = Window:CreateTab("Visuals", 4483362458)
 _G.ESPEnabled = false
 _G.ESPColor = Color3.fromRGB(255, 0, 0)
