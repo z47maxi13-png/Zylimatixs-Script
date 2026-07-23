@@ -198,11 +198,42 @@ local function stageNumber(name)
     return digits and tonumber(digits) or nil
 end
 
+-- Squashes "800M Wins" and "800m  wins!" to the same key, so the dropdown value can be
+-- compared against whatever spacing the game uses on its portal signs
+local function tierKey(text)
+    -- gsub returns the count as a second value, so bind it before returning
+    local key = (text or ""):lower():gsub("[^%w]", "")
+    return key
+end
+
+-- The part a world label is attached to: BillboardGuis point at one through Adornee,
+-- SurfaceGuis simply sit inside it
+local function anchorPart(guiObject)
+    local node = guiObject
+    while node and node ~= Workspace do
+        if node:IsA("BasePart") then
+            return node
+        end
+        if (node:IsA("BillboardGui") or node:IsA("SurfaceGui")) and node.Adornee and node.Adornee:IsA("BasePart") then
+            return node.Adornee
+        end
+        node = node.Parent
+    end
+    return nil
+end
+
 -- One descendant pass clears hazards and collects the targets (three passes lagged big maps)
 local function collectTargets(origin, clearHazards)
     local stages, goals = {}, {}
     local stageNamed, goalNamed = 0, 0
     local root = getWorldRoot()
+
+    -- The game labels its own gates. "Stage 7" on a billboard is the order the player
+    -- sees, which beats guessing at internal part names, and the win tier portals carry
+    -- their tier as text as well.
+    local labelled, seen = {}, {}
+    local tierPart = nil
+    local wantedTier = tierKey(_G.SelectedWinTier)
 
     for _, obj in ipairs((root or Workspace):GetDescendants()) do
         if isHazard(obj) then
@@ -227,8 +258,25 @@ local function collectTargets(origin, clearHazards)
                 if isStage then table.insert(stages, obj) end
                 if isGoal then table.insert(goals, obj) end
             end
+        elseif obj:IsA("TextLabel") or obj:IsA("TextButton") then
+            local text = obj.Text or ""
+            local number = text:match("[Ss][Tt][Aa][Gg][Ee]%s*(%d+)")
+
+            if number then
+                local part = anchorPart(obj)
+                if part and not seen[part] then
+                    seen[part] = true
+                    table.insert(labelled, {part = part, order = tonumber(number)})
+                end
+            elseif wantedTier ~= "" and tierKey(text) == wantedTier then
+                tierPart = anchorPart(obj) or tierPart
+            end
         end
     end
+
+    table.sort(labelled, function(a, b)
+        return a.order < b.order
+    end)
 
     -- Sorting by height only works on a tower. Flat race maps need the number in the
     -- name, so build one sort key per part: numbered stages first, the rest by distance.
@@ -240,7 +288,26 @@ local function collectTargets(origin, clearHazards)
         return keys[a] < keys[b]
     end)
 
-    return stages, goals, stageNamed, goalNamed
+    return {
+        stages = stages,
+        goals = goals,
+        stageNamed = stageNamed,
+        goalNamed = goalNamed,
+        labelled = labelled,
+        tierPart = tierPart,
+    }
+end
+
+-- Prefer what the game shows the player over what it calls things internally
+local function routeFrom(targets)
+    if #targets.labelled > 0 then
+        local ordered = {}
+        for _, entry in ipairs(targets.labelled) do
+            table.insert(ordered, entry.part)
+        end
+        return ordered, targets.tierPart and {targets.tierPart} or targets.goals
+    end
+    return targets.stages, targets.goals
 end
 
 -- Waits for a living character instead of yielding forever when the respawn never comes
@@ -405,7 +472,7 @@ local function executeCleanGlide(generation)
     local char, hrp, humanoid = getCharacterParts(stillActive, respawnTimeout)
     if not char then return end
 
-    local stages, goals = collectTargets(hrp.Position, true)
+    local stages, goals = routeFrom(collectTargets(hrp.Position, true))
 
     -- Flight mode has to come back off even when the run errors out mid-air
     setFlightMode(char, humanoid, true)
@@ -569,7 +636,9 @@ UtilTab:CreateButton({
         end
 
         local pos = hrp.Position
-        local stages, goals, stageNamed, goalNamed = collectTargets(pos, false)
+        local targets = collectTargets(pos, false)
+        local stages, goals = routeFrom(targets)
+        local stageNamed, goalNamed = targets.stageNamed, targets.goalNamed
         local root = getWorldRoot()
 
         add("=== Zylimatixs Debug Scan ===")
@@ -577,8 +646,41 @@ UtilTab:CreateButton({
         add(string.format("Player at X=%.0f Y=%.0f Z=%.0f", pos.X, pos.Y, pos.Z))
         add("World folders in this map: " .. tostring(mapHasWorldFolders()))
         add("World 3 container: " .. (root and root:GetFullName() or "NOT FOUND"))
+        add(string.format("Labelled stages found: %d", #targets.labelled))
+        add(string.format("Win tier portal for %s: %s", tostring(_G.SelectedWinTier),
+            targets.tierPart and targets.tierPart:GetFullName() or "NOT FOUND"))
+        add(string.format("Route source: %s", #targets.labelled > 0 and "world labels" or "part names"))
         add(string.format("Stages: %d usable of %d named", #stages, stageNamed))
         add(string.format("Goals:  %d usable of %d named", #goals, goalNamed))
+
+        if #targets.labelled > 0 then
+            add("-- labelled stages in order --")
+            for i, entry in ipairs(targets.labelled) do
+                if i > 20 then
+                    add(string.format("   ... and %d more", #targets.labelled - 20))
+                    break
+                end
+                add(string.format("  Stage %-3d %s | %.0f studs", entry.order, entry.part:GetFullName(), (entry.part.Position - pos).Magnitude))
+            end
+        else
+            -- No "Stage N" text anywhere, so dump what the world labels actually say
+            add("-- nearest world label texts --")
+            local labels = {}
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+                    local part = anchorPart(obj)
+                    if part then
+                        table.insert(labels, {text = obj.Text, distance = (part.Position - pos).Magnitude})
+                    end
+                end
+            end
+            table.sort(labels, function(a, b)
+                return a.distance < b.distance
+            end)
+            for i = 1, math.min(#labels, 30) do
+                add(string.format("  %5.0f  %q", labels[i].distance, labels[i].text))
+            end
+        end
 
         add("-- Workspace top level --")
         for i, child in ipairs(Workspace:GetChildren()) do
