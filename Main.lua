@@ -10,6 +10,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
+local MarketplaceService = game:GetService("MarketplaceService")
 local LocalPlayer = Players.LocalPlayer
 
 -- Anti-Prompt Safety Filter (Prevents accidental product purchase prompts).
@@ -81,8 +82,8 @@ MainTab:CreateDropdown({
 })
 
 -- Target: World 3 of "+1 Speed Keyboard Escape | Candy & Chocolate" by SecretVerse
--- Studio. World 3 is the endgame Wins zone, unlocked at level 400.
-local targetPlaceId = 95082159892680
+-- Studio. World 3 is the endgame Wins zone and lives in its own place, so it is
+-- identified by name and layout rather than by a place id.
 local worldPattern = "world%s*_?3"
 local anyWorldPattern = "world%s*_?%d"
 
@@ -551,23 +552,39 @@ MainTab:CreateToggle({
 
             -- Say what the route looks like right away. Reading a mobile console mid-farm
             -- is not something anyone should have to do to find out whether this works.
+            -- This must always report something, silence is what left us guessing before.
             task.spawn(function()
-                local char = LocalPlayer.Character
-                local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
-                if not hrp then return end
+                local ok, err = pcall(function()
+                    local hrp = nil
+                    local deadline = tick() + 5
+                    while tick() < deadline and not hrp do
+                        local char = LocalPlayer.Character
+                        hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+                        if not hrp then task.wait(0.2) end
+                    end
 
-                local targets = collectTargets(hrp.Position, false)
-                local stages = routeFrom(targets)
-                local source = #targets.labelled > 0 and "stage signs" or "part names"
+                    if not hrp then
+                        Rayfield:Notify({ Title = "Route Scan", Content = "No character yet, try again in a moment.", Duration = 6 })
+                        return
+                    end
 
-                Rayfield:Notify({
-                    Title = #stages > 0 and "Route Found" or "No Route Found",
-                    Content = #stages > 0
-                        and string.format("%d stages via %s. Tier portal: %s.", #stages, source,
-                            targets.tierPart and "found" or "not found")
-                        or "Nothing to glide to here. Try the Route tab and record the course once.",
-                    Duration = 8
-                })
+                    local targets = collectTargets(hrp.Position, false)
+                    local stages = routeFrom(targets)
+                    local source = #targets.labelled > 0 and "stage signs" or "part names"
+
+                    Rayfield:Notify({
+                        Title = #stages > 0 and "Route Found" or "No Route Found",
+                        Content = #stages > 0
+                            and string.format("%d stages via %s. Tier portal: %s.", #stages, source,
+                                targets.tierPart and "found" or "not found")
+                            or "Nothing to glide to here. Record the course once in the Route tab.",
+                        Duration = 10
+                    })
+                end)
+
+                if not ok then
+                    Rayfield:Notify({ Title = "Route Scan Failed", Content = tostring(err), Duration = 10 })
+                end
             end)
 
             task.spawn(function()
@@ -684,7 +701,7 @@ UtilTab:CreateButton({
         local root = getWorldRoot()
 
         add("=== Zylimatixs Debug Scan ===")
-        add(string.format("PlaceId %d (expected %d)", game.PlaceId, targetPlaceId))
+        add(string.format("PlaceId %d", game.PlaceId))
         add(string.format("Player at X=%.0f Y=%.0f Z=%.0f", pos.X, pos.Y, pos.Z))
         add("World folders in this map: " .. tostring(mapHasWorldFolders()))
         add("World 3 container: " .. (root and root:GetFullName() or "NOT FOUND"))
@@ -1029,8 +1046,6 @@ end)
 
 Rayfield:LoadConfiguration()
 
--- Wrong game or wrong world means every scan below runs against a map this script was
--- never built for, so say it out loud instead of failing quietly
 task.spawn(function()
     if loadRoute() then
         Rayfield:Notify({
@@ -1040,19 +1055,18 @@ task.spawn(function()
         })
     end
 
-    if game.PlaceId ~= targetPlaceId then
-        Rayfield:Notify({
-            Title = "Wrong Game",
-            Content = "This build only targets +1 Speed Keyboard Escape (World 3). Nothing here is tuned for this place.",
-            Duration = 10
-        })
-        return
-    end
+    -- Each world of this game is its own place with its own id, so a hard coded place
+    -- id declared World 3 the wrong game. Ask the platform for the name instead, that
+    -- one is shared across every world.
+    local ok, info = pcall(function()
+        return MarketplaceService:GetProductInfo(game.PlaceId)
+    end)
+    local placeName = (ok and info and info.Name) or ""
 
-    if not getWorldRoot() then
+    if placeName ~= "" and not placeName:lower():find("keyboard escape") then
         Rayfield:Notify({
-            Title = "World 3 Not Found",
-            Content = "No World 3 container in this map. Run Debug Scan in Utilities and send the output.",
+            Title = "Different Game",
+            Content = string.format("Tuned for +1 Speed Keyboard Escape. You are in %s. Gliding still works, the win tiers may not.", placeName),
             Duration = 10
         })
     end
