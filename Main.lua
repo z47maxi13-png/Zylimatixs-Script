@@ -9,6 +9,7 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
 -- Anti-Prompt Safety Filter (Prevents accidental product purchase prompts).
@@ -56,7 +57,7 @@ local MainSection = MainTab:CreateSection("Auto Win (Glide System)")
 _G.SelectedWinTier = "300M Wins"
 _G.AutoWinFarmActive = false
 _G.AutoResetEnabled = false
-_G.GlideHeight = 15         -- studs above the route, low and flat like a real glide
+_G.GlideHeight = 5          -- studs above the route: low enough to pass through pickups
 _G.GlideSpeed = 190         -- studs per second
 _G.FireWinRemotes = false   -- off: firing unknown remotes is how shop handlers get hit
 
@@ -97,7 +98,6 @@ local goalWords = {"win", "end", "goal"}
 -- Glide tuning (height and speed are sliders in the MAIN tab)
 local arriveRadius = 12     -- how close to a target still counts as reached
 local stuckTimeout = 0.6    -- seconds without movement before a jump counts as stuck
-local maxMisses = 3         -- failed stages in a row before the cycle restarts
 local respawnTimeout = 8    -- seconds we wait for a new character after the reset
 local searchDepth = 15      -- how far below the player a target may still sit
 
@@ -386,21 +386,6 @@ local function facing(position, lookAt)
     return CFrame.new(position, lookAt)
 end
 
--- Rises just far enough to clear the walls in between, crosses at a steady speed facing
--- the direction of travel, then settles onto the stage. A low flat glide, not a tall arc.
-local function glideRoute(hrp, targetCFrame, stillActive)
-    local startPos = hrp.Position
-    local targetPos = targetCFrame.Position
-    local cruiseY = math.max(startPos.Y, targetPos.Y) + math.max(_G.GlideHeight, 0)
-
-    local liftPos = Vector3.new(startPos.X, cruiseY, startPos.Z)
-    local crossPos = Vector3.new(targetPos.X, cruiseY, targetPos.Z)
-
-    if not tweenTo(hrp, facing(liftPos, crossPos), stillActive) then return false end
-    if not tweenTo(hrp, facing(crossPos, targetPos), stillActive) then return false end
-    return tweenTo(hrp, targetCFrame, stillActive)
-end
-
 -- Remembers the original collision state per part, restoring everything to true would
 -- make the root part and the accessories solid, which they never were
 local collisionMemory = setmetatable({}, {__mode = "k"})
@@ -432,34 +417,69 @@ local function touchPart(hrp, part)
     end)
 end
 
--- Walks the stage list, then the goal parts. Runs with flight mode on.
-local function traverse(hrp, stages, goals, stillActive)
-    local misses = 0
-    for _, stagePart in ipairs(stages) do
-        if not stillActive() or not hrp.Parent then return end
+-- Moves the root part along the whole route in one continuous sweep, one small step per
+-- frame, instead of tweening to a target and stopping before the next one. Pickups are
+-- collected by physically passing through them, which never happens when the character
+-- jumps from target to target and skips everything in between.
+local function glideThrough(hrp, parts, stillActive)
+    local index = 1
+    local lastPos = hrp.Position
+    local stalled = 0
+    local lastTick = tick()
 
-        -- The stage can be gone by now, the scan happened a few seconds ago
-        if stagePart.Parent then
-            if glideRoute(hrp, stagePart.CFrame + Vector3.new(0, 4, 0), stillActive) then
-                misses = 0
-                touchPart(hrp, stagePart)
+    while index <= #parts do
+        if not stillActive() or not hrp.Parent then return false end
+
+        local part = parts[index]
+        if not part.Parent then
+            -- Gone since the scan, skip it rather than aiming at a dead instance
+            index = index + 1
+        else
+            local now = tick()
+            -- Cap the delta so one lag spike cannot fling the character across the map
+            local delta = math.min(now - lastTick, 0.1)
+            lastTick = now
+
+            local step = math.max(_G.GlideSpeed, 10) * delta
+            local target = part.Position + Vector3.new(0, math.max(_G.GlideHeight, 0), 0)
+            local toTarget = target - hrp.Position
+            local remaining = toTarget.Magnitude
+
+            if remaining <= math.max(step, 2) then
+                -- Arrived. Aim straight at the next one and keep moving, no pause.
+                local nextPart = parts[index + 1]
+                local lookAt = (nextPart and nextPart.Parent) and nextPart.Position or (target + hrp.CFrame.LookVector * 10)
+                hrp.CFrame = facing(target, lookAt)
+                touchPart(hrp, part)
+                index = index + 1
             else
-                misses = misses + 1
-                -- Blocked or pulled back too often, restart the whole cycle instead of grinding
-                if misses >= maxMisses then return end
+                hrp.CFrame = facing(hrp.Position + toTarget.Unit * step, target)
             end
+
+            -- Anti-stuck still applies: an anti-cheat pulling us back has to end the run
+            if (hrp.Position - lastPos).Magnitude < 0.5 then
+                stalled = stalled + delta
+                if stalled >= stuckTimeout * 3 then return false end
+            else
+                stalled = 0
+            end
+            lastPos = hrp.Position
         end
+
+        RunService.Heartbeat:Wait()
     end
 
-    -- Trigger final goal/win portal safely
-    for _, goalPart in ipairs(goals) do
-        if not stillActive() or not hrp.Parent then return end
+    return true
+end
 
-        if goalPart.Parent then
-            hrp.CFrame = goalPart.CFrame + Vector3.new(0, 4, 0)
-            task.wait(0.05)
-            touchPart(hrp, goalPart)
-        end
+-- Sweeps the stage route, then the goal parts. Runs with flight mode on.
+local function traverse(hrp, stages, goals, stillActive)
+    if #stages > 0 and not glideThrough(hrp, stages, stillActive) then
+        return -- stuck or switched off, the cycle restarts from scratch
+    end
+
+    if #goals > 0 then
+        glideThrough(hrp, goals, stillActive)
     end
 end
 
@@ -567,7 +587,7 @@ MainTab:CreateSlider({
     Range = {0, 150},
     Increment = 5,
     Suffix = " studs",
-    CurrentValue = 15,
+    CurrentValue = 5,
     Flag = "GlideHeightSlider",
     Callback = function(Value)
         _G.GlideHeight = Value
