@@ -28,7 +28,7 @@ end)
 local Window = Rayfield:CreateWindow({
     Name = "Zylimatixs Script | Made by Maxizzzy",
     LoadingTitle = "Zylimatixs Hub",
-    LoadingSubtitle = "Clean Glide & Anti-Stuck Edition",
+    LoadingSubtitle = "World 3 | +1 Speed Keyboard Escape",
     ConfigurationSaving = {
         Enabled = true,
         FolderName = "ZylimatixsHub",
@@ -66,6 +66,11 @@ MainTab:CreateDropdown({
     end,
 })
 
+-- Target: World 3 of "+1 Speed Keyboard Escape | Candy & Chocolate" by SecretVerse
+-- Studio. World 3 is the endgame Wins zone, unlocked at level 400.
+local targetPlaceId = 95082159892680
+local worldPattern = "world%s*_?3"
+
 local hazardWords = {"wave", "welle", "ball", "kugel", "sphere", "kill", "laser", "obstacle", "trap", "fire", "hazard", "roll", "moving", "boulder", "rock", "spike"}
 local stageWords = {"stage", "checkpoint", "platform", "key", "win"}
 local stageBlockWords = {"shop", "buy", "pass", "ball", "wave", "wall"}
@@ -94,15 +99,55 @@ local function farmActive(generation)
     return _G.AutoWinFarmActive and generation == farmGeneration
 end
 
+-- World 3 is the endgame Wins zone of "+1 Speed Keyboard Escape". Everything below
+-- stays inside it, so stages from World 1 and 2 can never pull the glide off course.
+local worldRootCache = nil
+
+local function findWorldRoot()
+    local best, bestDepth = nil, math.huge
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if (obj:IsA("Folder") or obj:IsA("Model")) and obj.Name:lower():match(worldPattern) then
+            -- The shallowest match is the container, deeper ones are parts inside it
+            local depth, node = 0, obj
+            while node and node ~= Workspace do
+                depth = depth + 1
+                node = node.Parent
+            end
+            if depth < bestDepth then
+                best, bestDepth = obj, depth
+            end
+        end
+    end
+    return best
+end
+
+local function getWorldRoot()
+    if worldRootCache and worldRootCache.Parent then
+        return worldRootCache
+    end
+    worldRootCache = findWorldRoot()
+    return worldRootCache
+end
+
+-- Only called for objects that already matched a keyword, GetFullName on every
+-- descendant of the map would be far too slow
+local function inWorld3(obj, root)
+    if root then
+        return true -- the search already started inside the container
+    end
+    return obj:GetFullName():lower():match(worldPattern) ~= nil
+end
+
 -- Hazard and Obstacle Eraser (W Waves, Balls, Spheres, Lasers)
 local function isHazard(obj)
     return (obj:IsA("BasePart") or obj:IsA("Model")) and matchesAny(obj.Name:lower(), hazardWords)
 end
 
 local function wipeAllHazards()
+    local root = getWorldRoot()
     local count = 0
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if isHazard(obj) then
+    for _, obj in ipairs((root or Workspace):GetDescendants()) do
+        if isHazard(obj) and inWorld3(obj, root) then
             local removed = pcall(function()
                 obj:Destroy()
             end)
@@ -124,10 +169,11 @@ end
 local function collectTargets(origin, clearHazards)
     local stages, goals = {}, {}
     local stageNamed, goalNamed = 0, 0
+    local root = getWorldRoot()
 
-    for _, obj in ipairs(Workspace:GetDescendants()) do
+    for _, obj in ipairs((root or Workspace):GetDescendants()) do
         if isHazard(obj) then
-            if clearHazards then
+            if clearHazards and inWorld3(obj, root) then
                 pcall(function()
                     obj:Destroy()
                 end)
@@ -136,6 +182,10 @@ local function collectTargets(origin, clearHazards)
             local n = obj.Name:lower()
             local isStage = matchesAny(n, stageWords) and not matchesAny(n, stageBlockWords)
             local isGoal = matchesAny(n, goalWords)
+
+            if (isStage or isGoal) and not inWorld3(obj, root) then
+                isStage, isGoal = false, false
+            end
 
             if isStage then stageNamed = stageNamed + 1 end
             if isGoal then goalNamed = goalNamed + 1 end
@@ -467,6 +517,14 @@ UtilTab:CreateButton({
 
         print("=== Zylimatixs Debug Scan ===")
         print(string.format("Player at X=%.0f Y=%.0f Z=%.0f", pos.X, pos.Y, pos.Z))
+
+        local root = getWorldRoot()
+        if root then
+            print("World 3 container: " .. root:GetFullName())
+        else
+            print("World 3 container: NOT FOUND - falling back to name matching on the full path")
+            print("  (if the counts below are 0, tell Claude what the World 3 folder is called)")
+        end
         print(string.format("Stages: %d usable of %d named (%d dropped by the height filter)", #stages, stageNamed, stageNamed - #stages))
         print(string.format("Goals:  %d usable of %d named (%d dropped by the height filter)", #goals, goalNamed, goalNamed - #goals))
 
@@ -570,3 +628,24 @@ Players.PlayerAdded:Connect(function(player)
 end)
 
 Rayfield:LoadConfiguration()
+
+-- Wrong game or wrong world means every scan below runs against a map this script was
+-- never built for, so say it out loud instead of failing quietly
+task.spawn(function()
+    if game.PlaceId ~= targetPlaceId then
+        Rayfield:Notify({
+            Title = "Wrong Game",
+            Content = "This build only targets +1 Speed Keyboard Escape (World 3). Nothing here is tuned for this place.",
+            Duration = 10
+        })
+        return
+    end
+
+    if not getWorldRoot() then
+        Rayfield:Notify({
+            Title = "World 3 Not Found",
+            Content = "No World 3 container in this map. Run Debug Scan in Utilities and send the output.",
+            Duration = 10
+        })
+    end
+end)
