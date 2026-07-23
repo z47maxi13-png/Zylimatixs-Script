@@ -71,13 +71,22 @@ local winTiers = {
     "3.5B Wins"
 }
 
+-- Newer Rayfield hands a dropdown selection over as a table of options, older builds
+-- as a plain string. Everything downstream wants the string.
+local function firstOption(value)
+    if type(value) == "table" then
+        return value[1]
+    end
+    return value
+end
+
 MainTab:CreateDropdown({
     Name = "Select Win Tier",
     Options = winTiers,
-    CurrentOption = "300M Wins",
+    CurrentOption = {"300M Wins"},
     Flag = "WinTierDropdown",
     Callback = function(Option)
-        _G.SelectedWinTier = Option
+        _G.SelectedWinTier = firstOption(Option) or _G.SelectedWinTier
     end,
 })
 
@@ -202,8 +211,12 @@ end
 -- Squashes "800M Wins" and "800m  wins!" to the same key, so the dropdown value can be
 -- compared against whatever spacing the game uses on its portal signs
 local function tierKey(text)
+    text = firstOption(text)
+    if type(text) ~= "string" then
+        return ""
+    end
     -- gsub returns the count as a second value, so bind it before returning
-    local key = (text or ""):lower():gsub("[^%w]", "")
+    local key = text:lower():gsub("[^%w]", "")
     return key
 end
 
@@ -629,7 +642,8 @@ MainTab:CreateSlider({
     CurrentValue = 5,
     Flag = "GlideHeightSlider",
     Callback = function(Value)
-        _G.GlideHeight = Value
+        -- Guarded the same way as the dropdown: math.max on a table would kill the glide
+        _G.GlideHeight = tonumber(firstOption(Value)) or _G.GlideHeight
     end,
 })
 
@@ -641,7 +655,7 @@ MainTab:CreateSlider({
     CurrentValue = 190,
     Flag = "GlideSpeedSlider",
     Callback = function(Value)
-        _G.GlideSpeed = Value
+        _G.GlideSpeed = tonumber(firstOption(Value)) or _G.GlideSpeed
     end,
 })
 
