@@ -548,6 +548,28 @@ MainTab:CreateToggle({
 
         if Value then
             local generation = farmGeneration
+
+            -- Say what the route looks like right away. Reading a mobile console mid-farm
+            -- is not something anyone should have to do to find out whether this works.
+            task.spawn(function()
+                local char = LocalPlayer.Character
+                local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+                if not hrp then return end
+
+                local targets = collectTargets(hrp.Position, false)
+                local stages = routeFrom(targets)
+                local source = #targets.labelled > 0 and "stage signs" or "part names"
+
+                Rayfield:Notify({
+                    Title = #stages > 0 and "Route Found" or "No Route Found",
+                    Content = #stages > 0
+                        and string.format("%d stages via %s. Tier portal: %s.", #stages, source,
+                            targets.tierPart and "found" or "not found")
+                        or "Nothing to glide to here. Try the Route tab and record the course once.",
+                    Duration = 8
+                })
+            end)
+
             task.spawn(function()
                 while farmActive(generation) do
                     local ok, err = pcall(executeCleanGlide, generation)
