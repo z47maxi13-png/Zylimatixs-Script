@@ -10,14 +10,25 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 
--- Anti-Prompt Safety Filter (Prevents accidental product purchase prompts)
+-- Anti-Prompt Safety Filter (Prevents accidental product purchase prompts).
+-- Every Prompt* method MarketplaceService exposes, not just the three obvious ones.
+local blockedPrompts = {
+    PromptProductPurchase = true,
+    PromptGamePassPurchase = true,
+    PromptBundlePurchase = true,
+    PromptPurchase = true,
+    PromptPremiumPurchase = true,
+    PromptSubscriptionPurchase = true,
+    PromptThirdPartyPurchase = true,
+    PromptRobloxPurchase = true,
+}
+
 pcall(function()
     local mt = getrawmetatable(game)
     setreadonly(mt, false)
     local oldNamecall = mt.__namecall
     mt.__namecall = newcclosure(function(self, ...)
-        local method = getnamecallmethod()
-        if method == "PromptProductPurchase" or method == "PromptGamePassPurchase" or method == "PromptBundlePurchase" then
+        if blockedPrompts[getnamecallmethod()] then
             return nil
         end
         return oldNamecall(self, ...)
@@ -46,6 +57,7 @@ _G.AutoWinFarmActive = false
 _G.AutoResetEnabled = false
 _G.GlideHeight = 15         -- studs above the route, low and flat like a real glide
 _G.GlideSpeed = 190         -- studs per second
+_G.FireWinRemotes = false   -- off: firing unknown remotes is how shop handlers get hit
 
 local winTiers = {
     "300M Wins",
@@ -73,7 +85,11 @@ local worldPattern = "world%s*_?3"
 
 local hazardWords = {"wave", "welle", "ball", "kugel", "sphere", "kill", "laser", "obstacle", "trap", "fire", "hazard", "roll", "moving", "boulder", "rock", "spike"}
 local stageWords = {"stage", "checkpoint", "platform", "key", "win"}
-local stageBlockWords = {"shop", "buy", "pass", "ball", "wave", "wall"}
+-- Never touched, never fired. The goal list had no blocker at all, so a pad called
+-- something like "BuyWins" counted as a goal, got touched, and popped the Roblox
+-- purchase dialog. Anything that can cost Robux belongs in here.
+local blockWords = {"shop", "buy", "pass", "gamepass", "robux", "purchase", "product",
+    "premium", "donate", "dev", "gift", "sign", "npc", "ball", "wave", "wall"}
 local goalWords = {"win", "end", "goal"}
 
 -- Glide tuning (height and speed are sliders in the MAIN tab)
@@ -180,8 +196,8 @@ local function collectTargets(origin, clearHazards)
             end
         elseif obj:IsA("BasePart") and obj.Parent then
             local n = obj.Name:lower()
-            local isStage = matchesAny(n, stageWords) and not matchesAny(n, stageBlockWords)
-            local isGoal = matchesAny(n, goalWords)
+            local isStage = matchesAny(n, stageWords) and not matchesAny(n, blockWords)
+            local isGoal = matchesAny(n, goalWords) and not matchesAny(n, blockWords)
 
             if (isStage or isGoal) and not inWorld3(obj, root) then
                 isStage, isGoal = false, false
@@ -378,17 +394,20 @@ local function executeCleanGlide(generation)
         warn("[Zylimatixs] Traverse failed: " .. tostring(err))
     end
 
-    -- Fire server-side win tier event
-    pcall(function()
-        for _, remote in ipairs(ReplicatedStorage:GetDescendants()) do
-            if remote:IsA("RemoteEvent") then
-                local name = remote.Name:lower()
-                if (name:find("win") or name:find("stage") or name:find("reward")) and not name:find("product") and not name:find("purchase") then
-                    remote:FireServer(_G.SelectedWinTier)
+    -- Fire server-side win tier event. Off by default: this sprays an argument at every
+    -- remote whose name looks right, and one of those can be a shop handler.
+    if _G.FireWinRemotes then
+        pcall(function()
+            for _, remote in ipairs(ReplicatedStorage:GetDescendants()) do
+                if remote:IsA("RemoteEvent") then
+                    local name = remote.Name:lower()
+                    if (name:find("win") or name:find("stage") or name:find("reward")) and not matchesAny(name, blockWords) then
+                        remote:FireServer(_G.SelectedWinTier)
+                    end
                 end
             end
-        end
-    end)
+        end)
+    end
 
     -- Optional reset. Obby maps hand out the reward on death, race maps just send you
     -- back to the start, so this stays off unless the game actually rewards it.
@@ -440,6 +459,15 @@ MainTab:CreateToggle({
     Flag = "AutoResetToggle",
     Callback = function(Value)
         _G.AutoResetEnabled = Value
+    end,
+})
+
+MainTab:CreateToggle({
+    Name = "Fire Win Remotes (risky, can hit shop handlers)",
+    CurrentValue = false,
+    Flag = "FireWinRemotesToggle",
+    Callback = function(Value)
+        _G.FireWinRemotes = Value
     end,
 })
 
