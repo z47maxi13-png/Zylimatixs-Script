@@ -82,6 +82,7 @@ MainTab:CreateDropdown({
 -- Studio. World 3 is the endgame Wins zone, unlocked at level 400.
 local targetPlaceId = 95082159892680
 local worldPattern = "world%s*_?3"
+local anyWorldPattern = "world%s*_?%d"
 
 local hazardWords = {"wave", "welle", "ball", "kugel", "sphere", "kill", "laser", "obstacle", "trap", "fire", "hazard", "roll", "moving", "boulder", "rock", "spike"}
 local stageWords = {"stage", "checkpoint", "platform", "key", "win"}
@@ -145,11 +146,26 @@ local function getWorldRoot()
     return worldRootCache
 end
 
+-- True when this place splits its worlds into containers at all. If it does not, the
+-- whole map already is one world and filtering by name would throw away everything,
+-- which is exactly what turned up 0 stages and 0 goals.
+local function mapHasWorldFolders()
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if (obj:IsA("Folder") or obj:IsA("Model")) and obj.Name:lower():match(anyWorldPattern) then
+            return true
+        end
+    end
+    return false
+end
+
 -- Only called for objects that already matched a keyword, GetFullName on every
 -- descendant of the map would be far too slow
 local function inWorld3(obj, root)
     if root then
         return true -- the search already started inside the container
+    end
+    if not mapHasWorldFolders() then
+        return true -- single world place, nothing to separate
     end
     return obj:GetFullName():lower():match(worldPattern) ~= nil
 end
@@ -529,9 +545,10 @@ UtilTab:CreateButton({
     end
 })
 
--- Prints what the scanner really sees, so tuning stops being guesswork
+-- Reports what the scanner really sees, so tuning stops being guesswork. The report
+-- goes to the clipboard as well, reading a mobile executor console is painful.
 UtilTab:CreateButton({
-    Name = "Debug Scan (prints to console)",
+    Name = "Debug Scan (copies report to clipboard)",
     Callback = function()
         local char = LocalPlayer.Character
         local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
@@ -540,62 +557,103 @@ UtilTab:CreateButton({
             return
         end
 
-        local stages, goals, stageNamed, goalNamed = collectTargets(hrp.Position, false)
-        local pos = hrp.Position
-
-        print("=== Zylimatixs Debug Scan ===")
-        print(string.format("Player at X=%.0f Y=%.0f Z=%.0f", pos.X, pos.Y, pos.Z))
-
-        local root = getWorldRoot()
-        if root then
-            print("World 3 container: " .. root:GetFullName())
-        else
-            print("World 3 container: NOT FOUND - falling back to name matching on the full path")
-            print("  (if the counts below are 0, tell Claude what the World 3 folder is called)")
+        local lines = {}
+        local function add(text)
+            table.insert(lines, text)
         end
-        print(string.format("Stages: %d usable of %d named (%d dropped by the height filter)", #stages, stageNamed, stageNamed - #stages))
-        print(string.format("Goals:  %d usable of %d named (%d dropped by the height filter)", #goals, goalNamed, goalNamed - #goals))
 
-        print("-- first stages in glide order --")
-        for i, part in ipairs(stages) do
-            if i > 25 then
-                print(string.format("   ... and %d more", #stages - 25))
+        local pos = hrp.Position
+        local stages, goals, stageNamed, goalNamed = collectTargets(pos, false)
+        local root = getWorldRoot()
+
+        add("=== Zylimatixs Debug Scan ===")
+        add(string.format("PlaceId %d (expected %d)", game.PlaceId, targetPlaceId))
+        add(string.format("Player at X=%.0f Y=%.0f Z=%.0f", pos.X, pos.Y, pos.Z))
+        add("World folders in this map: " .. tostring(mapHasWorldFolders()))
+        add("World 3 container: " .. (root and root:GetFullName() or "NOT FOUND"))
+        add(string.format("Stages: %d usable of %d named", #stages, stageNamed))
+        add(string.format("Goals:  %d usable of %d named", #goals, goalNamed))
+
+        add("-- Workspace top level --")
+        for i, child in ipairs(Workspace:GetChildren()) do
+            if i > 30 then
+                add("   ...")
                 break
             end
-            print(string.format("  [%02d] %-40s %5.0f studs away, Y=%.0f", i, part:GetFullName(), (part.Position - pos).Magnitude, part.Position.Y))
+            add(string.format("  %s [%s]", child.Name, child.ClassName))
         end
 
-        print("-- first goals --")
+        add("-- first stages in glide order --")
+        for i, part in ipairs(stages) do
+            if i > 20 then
+                add(string.format("   ... and %d more", #stages - 20))
+                break
+            end
+            add(string.format("  [%02d] %s | %.0f studs | Y=%.0f", i, part:GetFullName(), (part.Position - pos).Magnitude, part.Position.Y))
+        end
+
+        add("-- first goals --")
         for i, part in ipairs(goals) do
             if i > 10 then
-                print(string.format("   ... and %d more", #goals - 10))
+                add(string.format("   ... and %d more", #goals - 10))
                 break
             end
-            print(string.format("  [%02d] %-40s %5.0f studs away", i, part:GetFullName(), (part.Position - pos).Magnitude))
+            add(string.format("  [%02d] %s | %.0f studs", i, part:GetFullName(), (part.Position - pos).Magnitude))
         end
 
-        print("-- remote events the script would fire --")
+        -- Nothing matched, so the keyword lists are wrong for this map. Dump the real
+        -- names around the player instead of leaving us to guess again.
+        if #stages == 0 and #goals == 0 then
+            local near = {}
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj:IsA("BasePart") and obj.Parent then
+                    local distance = (obj.Position - pos).Magnitude
+                    if distance <= 300 then
+                        table.insert(near, {part = obj, distance = distance})
+                    end
+                end
+            end
+            table.sort(near, function(a, b)
+                return a.distance < b.distance
+            end)
+
+            add(string.format("-- nothing matched, %d parts within 300 studs, nearest 40 --", #near))
+            for i = 1, math.min(#near, 40) do
+                add(string.format("  %5.0f  %s", near[i].distance, near[i].part:GetFullName()))
+            end
+        end
+
+        add("-- remote events matching win/stage/reward --")
         local remoteCount = 0
         pcall(function()
             for _, remote in ipairs(ReplicatedStorage:GetDescendants()) do
                 if remote:IsA("RemoteEvent") then
                     local name = remote.Name:lower()
-                    if (name:find("win") or name:find("stage") or name:find("reward")) and not name:find("product") and not name:find("purchase") then
+                    if (name:find("win") or name:find("stage") or name:find("reward")) and not matchesAny(name, blockWords) then
                         remoteCount = remoteCount + 1
                         if remoteCount <= 15 then
-                            print("  " .. remote:GetFullName())
+                            add("  " .. remote:GetFullName())
                         end
                     end
                 end
             end
         end)
-        print(string.format("Remote events matched: %d", remoteCount))
-        print("=== end of scan ===")
+        add(string.format("Remote events matched: %d", remoteCount))
+        add("=== end of scan ===")
+
+        local report = table.concat(lines, "\n")
+        print(report)
+
+        local copied = pcall(function()
+            setclipboard(report)
+        end)
 
         Rayfield:Notify({
             Title = "Debug Scan",
-            Content = string.format("%d stages, %d goals, %d remotes. Details in the console.", #stages, #goals, remoteCount),
-            Duration = 6
+            Content = copied
+                and string.format("%d stages, %d goals. Report copied, paste it to Claude.", #stages, #goals)
+                or string.format("%d stages, %d goals. Clipboard failed, check the console.", #stages, #goals),
+            Duration = 8
         })
     end
 })
