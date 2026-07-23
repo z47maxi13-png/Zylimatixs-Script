@@ -8,6 +8,7 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
 -- Anti-Prompt Safety Filter (Prevents accidental product purchase prompts).
@@ -243,9 +244,9 @@ local function collectTargets(origin, clearHazards)
 end
 
 -- Waits for a living character instead of yielding forever when the respawn never comes
-local function getCharacterParts(generation, timeout)
+local function getCharacterParts(stillActive, timeout)
     local deadline = tick() + timeout
-    while farmActive(generation) and tick() < deadline do
+    while stillActive() and tick() < deadline do
         local char = LocalPlayer.Character
         if char and char.Parent then
             local hrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
@@ -259,8 +260,9 @@ local function getCharacterParts(generation, timeout)
     return nil
 end
 
--- Tweens the root part to one waypoint and reports whether we really arrived
-local function tweenTo(hrp, targetCFrame, generation)
+-- Tweens the root part to one waypoint and reports whether we really arrived.
+-- stillActive is a predicate, so the auto win loop and the route player can share this.
+local function tweenTo(hrp, targetCFrame, stillActive)
     local distance = (targetCFrame.Position - hrp.Position).Magnitude
     local travelTime = math.max(distance / math.max(_G.GlideSpeed, 10), 0.05)
 
@@ -275,7 +277,7 @@ local function tweenTo(hrp, targetCFrame, generation)
     while true do
         task.wait(0.05)
 
-        if not farmActive(generation) or not hrp.Parent then
+        if not stillActive() or not hrp.Parent then
             tween:Cancel()
             return false
         end
@@ -319,7 +321,7 @@ end
 
 -- Rises just far enough to clear the walls in between, crosses at a steady speed facing
 -- the direction of travel, then settles onto the stage. A low flat glide, not a tall arc.
-local function glideRoute(hrp, targetCFrame, generation)
+local function glideRoute(hrp, targetCFrame, stillActive)
     local startPos = hrp.Position
     local targetPos = targetCFrame.Position
     local cruiseY = math.max(startPos.Y, targetPos.Y) + math.max(_G.GlideHeight, 0)
@@ -327,9 +329,9 @@ local function glideRoute(hrp, targetCFrame, generation)
     local liftPos = Vector3.new(startPos.X, cruiseY, startPos.Z)
     local crossPos = Vector3.new(targetPos.X, cruiseY, targetPos.Z)
 
-    if not tweenTo(hrp, facing(liftPos, crossPos), generation) then return false end
-    if not tweenTo(hrp, facing(crossPos, targetPos), generation) then return false end
-    return tweenTo(hrp, targetCFrame, generation)
+    if not tweenTo(hrp, facing(liftPos, crossPos), stillActive) then return false end
+    if not tweenTo(hrp, facing(crossPos, targetPos), stillActive) then return false end
+    return tweenTo(hrp, targetCFrame, stillActive)
 end
 
 -- Remembers the original collision state per part, restoring everything to true would
@@ -364,14 +366,14 @@ local function touchPart(hrp, part)
 end
 
 -- Walks the stage list, then the goal parts. Runs with flight mode on.
-local function traverse(hrp, stages, goals, generation)
+local function traverse(hrp, stages, goals, stillActive)
     local misses = 0
     for _, stagePart in ipairs(stages) do
-        if not farmActive(generation) or not hrp.Parent then return end
+        if not stillActive() or not hrp.Parent then return end
 
         -- The stage can be gone by now, the scan happened a few seconds ago
         if stagePart.Parent then
-            if glideRoute(hrp, stagePart.CFrame + Vector3.new(0, 4, 0), generation) then
+            if glideRoute(hrp, stagePart.CFrame + Vector3.new(0, 4, 0), stillActive) then
                 misses = 0
                 touchPart(hrp, stagePart)
             else
@@ -384,7 +386,7 @@ local function traverse(hrp, stages, goals, generation)
 
     -- Trigger final goal/win portal safely
     for _, goalPart in ipairs(goals) do
-        if not farmActive(generation) or not hrp.Parent then return end
+        if not stillActive() or not hrp.Parent then return end
 
         if goalPart.Parent then
             hrp.CFrame = goalPart.CFrame + Vector3.new(0, 4, 0)
@@ -396,14 +398,18 @@ end
 
 -- Above-Map Glide Progression Engine (Prevents underground falling / clipping)
 local function executeCleanGlide(generation)
-    local char, hrp, humanoid = getCharacterParts(generation, respawnTimeout)
+    local stillActive = function()
+        return farmActive(generation)
+    end
+
+    local char, hrp, humanoid = getCharacterParts(stillActive, respawnTimeout)
     if not char then return end
 
     local stages, goals = collectTargets(hrp.Position, true)
 
     -- Flight mode has to come back off even when the run errors out mid-air
     setFlightMode(char, humanoid, true)
-    local ok, err = pcall(traverse, hrp, stages, goals, generation)
+    local ok, err = pcall(traverse, hrp, stages, goals, stillActive)
     pcall(setFlightMode, char, humanoid, false)
 
     if not ok then
@@ -658,6 +664,170 @@ UtilTab:CreateButton({
     end
 })
 
+-- Route Tab
+-- Guessing the map's part names kept coming up empty, but the player already knows the
+-- way. Record the path once by playing it, then glide the recording on repeat. No name
+-- matching anywhere, so it works whatever the game calls its stages.
+local RouteTab = Window:CreateTab("Route", 4483362458)
+local RouteSection = RouteTab:CreateSection("Record & Replay")
+
+_G.RouteRecording = false
+_G.RoutePlaying = false
+
+local routePoints = {}
+local routeGeneration = 0
+local routeFolder = "ZylimatixsHub"
+local routeFile = routeFolder .. "/route.json"
+local minPointGap = 4       -- studs between recorded points, closer ones add nothing
+
+local function routeActive(generation)
+    return _G.RoutePlaying and generation == routeGeneration
+end
+
+local function pointToVector(point)
+    return Vector3.new(point.x, point.y, point.z)
+end
+
+local function saveRoute()
+    return pcall(function()
+        if not isfolder(routeFolder) then
+            makefolder(routeFolder)
+        end
+        writefile(routeFile, HttpService:JSONEncode(routePoints))
+    end)
+end
+
+local function loadRoute()
+    local ok, data = pcall(function()
+        if isfile(routeFile) then
+            return HttpService:JSONDecode(readfile(routeFile))
+        end
+        return nil
+    end)
+
+    if ok and type(data) == "table" and #data > 0 then
+        routePoints = data
+        return true
+    end
+    return false
+end
+
+RouteTab:CreateParagraph({
+    Title = "How this works",
+    Content = "1. Turn on Record, then play the course yourself, normally.\n2. Turn Record off at the finish, the path is saved.\n3. Turn on Play Route and it glides your path on repeat.\n\nThis needs no part names, so it works even when Auto Win finds nothing."
+})
+
+RouteTab:CreateToggle({
+    Name = "Record Route (just play normally)",
+    CurrentValue = false,
+    Flag = "RouteRecordToggle",
+    Callback = function(Value)
+        _G.RouteRecording = Value
+
+        if not Value then
+            local saved = saveRoute()
+            Rayfield:Notify({
+                Title = "Route Recorded",
+                Content = string.format("%d points captured%s", #routePoints, saved and " and saved." or ", saving failed."),
+                Duration = 6
+            })
+            return
+        end
+
+        routePoints = {}
+        task.spawn(function()
+            while _G.RouteRecording do
+                local char = LocalPlayer.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local pos = hrp.Position
+                    local last = routePoints[#routePoints]
+                    -- Only store real progress, standing still would fill the list with duplicates
+                    if not last or (pointToVector(last) - pos).Magnitude >= minPointGap then
+                        table.insert(routePoints, {x = pos.X, y = pos.Y, z = pos.Z})
+                    end
+                end
+                task.wait(0.15)
+            end
+        end)
+    end,
+})
+
+RouteTab:CreateToggle({
+    Name = "Play Route (loops)",
+    CurrentValue = false,
+    Flag = "RoutePlayToggle",
+    Callback = function(Value)
+        _G.RoutePlaying = Value
+        routeGeneration = routeGeneration + 1
+
+        if not Value then return end
+
+        if #routePoints < 2 then
+            _G.RoutePlaying = false
+            Rayfield:Notify({ Title = "Route", Content = "Nothing recorded yet. Record a route first.", Duration = 6 })
+            return
+        end
+
+        local generation = routeGeneration
+        local stillActive = function()
+            return routeActive(generation)
+        end
+
+        task.spawn(function()
+            while stillActive() do
+                local char, hrp, humanoid = getCharacterParts(stillActive, respawnTimeout)
+                if char then
+                    setFlightMode(char, humanoid, true)
+
+                    -- The recorded path is already safe ground, so follow it point by
+                    -- point instead of arcing over the map like the stage hunter does
+                    local ok, err = pcall(function()
+                        for i, point in ipairs(routePoints) do
+                            if not stillActive() or not hrp.Parent then return end
+                            local target = pointToVector(point)
+                            local nextPoint = routePoints[i + 1]
+                            local lookAt = nextPoint and pointToVector(nextPoint) or target
+                            tweenTo(hrp, facing(target, lookAt), stillActive)
+                        end
+                    end)
+
+                    pcall(setFlightMode, char, humanoid, false)
+                    if not ok then
+                        warn("[Zylimatixs] Route playback failed: " .. tostring(err))
+                    end
+                end
+                task.wait(0.25)
+            end
+        end)
+    end,
+})
+
+RouteTab:CreateButton({
+    Name = "Load Saved Route",
+    Callback = function()
+        local loaded = loadRoute()
+        Rayfield:Notify({
+            Title = "Route",
+            Content = loaded and string.format("Loaded %d points.", #routePoints) or "No saved route found.",
+            Duration = 5
+        })
+    end
+})
+
+RouteTab:CreateButton({
+    Name = "Clear Route",
+    Callback = function()
+        routePoints = {}
+        pcall(function()
+            if isfile(routeFile) then
+                delfile(routeFile)
+            end
+        end)
+        Rayfield:Notify({ Title = "Route", Content = "Route cleared.", Duration = 4 })
+    end
+})
+
 -- Visuals Tab (ESP)
 local VisualTab = Window:CreateTab("Visuals", 4483362458)
 local VisualSection = VisualTab:CreateSection("ESP Options")
@@ -718,6 +888,14 @@ Rayfield:LoadConfiguration()
 -- Wrong game or wrong world means every scan below runs against a map this script was
 -- never built for, so say it out loud instead of failing quietly
 task.spawn(function()
+    if loadRoute() then
+        Rayfield:Notify({
+            Title = "Route Restored",
+            Content = string.format("%d saved points loaded. Play Route is ready.", #routePoints),
+            Duration = 6
+        })
+    end
+
     if game.PlaceId ~= targetPlaceId then
         Rayfield:Notify({
             Title = "Wrong Game",
